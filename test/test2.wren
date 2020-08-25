@@ -1,0 +1,1 @@
+var isDone = false || true System.print(1 != 2 ? "math is sane" : "math is not sane!")

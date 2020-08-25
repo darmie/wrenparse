@@ -1,0 +1,14 @@
+{
+  "name": "wrenparse",
+  "version": "0.0.1",
+  "scripts": {
+    "haxe": "haxe",
+    "neko": "neko",
+    "postinstall": "lix download",
+    "lix": "lix",
+    "haxelib": "haxelib"
+  },
+  "devDependencies": {
+    "lix": "^15.9.0"
+  }
+}

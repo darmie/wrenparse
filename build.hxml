@@ -1,0 +1,18 @@
+
+-cp src/
+-cp test/
+
+-main Test
+
+
+-lib hxparse
+
+# --each
+
+# --interp
+
+# --next
+--cpp bin/cpp
+
+# --cmd bin/cpp/Test
+
