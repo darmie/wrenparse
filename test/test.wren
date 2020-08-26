@@ -5,7 +5,7 @@ class Person {}
 class Boy is Person {
 	construct new(){
 	    if(a){
-			a = 1
+			a = ~1
 		}
 		super.a
 	}
