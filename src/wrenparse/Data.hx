@@ -364,6 +364,8 @@ enum ExprDef {
 	**/
 	EMeta(s:MetadataEntry, e:Expr);
 	ENull;
+
+	EBlockParam(caller:Expr, e:Expr);
 }
 
 typedef ObjectField = {
@@ -602,6 +604,16 @@ enum Access {
 
 	AStatic;
 	AForeign;
+}
+
+class AccessPrinter {
+	public static function toString(access:Access){
+		return switch access {
+			case AConstructor: "construct";
+			case AStatic: "static";
+			case AForeign: "foreign";
+		}
+	}
 }
 
 enum CodeDef {

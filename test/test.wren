@@ -7,11 +7,12 @@ class Boy is Person {
 	    if(a){
 			a = 1
 		}
+		super.a
 	}
 	name=(val){}
 	name{"boy"}
-	runner{
-		a
+	foreign static runner{
+		1 * 2
 	}
 	method(var1, var2){
 		var b = {
@@ -57,7 +58,7 @@ class Boy is Person {
 		boy = person
 		var arr = []
 		var arr2 = [1, 5]
-		call(4, 5)
+		call(4, 5, (4+5))
 		arr2[1...-5]
 		arr2[n...k]
 		boy.method(false)
@@ -65,8 +66,23 @@ class Boy is Person {
 		val.tables
 		null
 		System.print(false && 1)
+
+		System.print(a = "after")
 		
 		var isDone = false || true 
 		System.print(1 != 2 ? "math is sane" : "math is not sane!")
+
+
+		{
+			blockStatement
+		}
+
+		newFn.new{|a, b, c|
+			return
+		}
+
+		newFn.new{a}
+
+		System.print((2 * (6 - (2 + 2))))
 	}
 }

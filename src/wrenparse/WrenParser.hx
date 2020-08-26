@@ -177,7 +177,9 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 
 	function parseClassField() {
 		return switch stream {
-			case [{tok: Kwd(KwdConstruct)}]: parseConstructor();
+			case [{tok: Kwd(KwdConstruct)}]: parseMethodWithAccess([AConstructor]);
+			case [{tok: Kwd(KwdStatic)}]: parseMethodWithAccess([AStatic]);
+			case [{tok: Kwd(KwdForeign)}, {tok: Kwd(KwdStatic)}]: parseMethodWithAccess([AForeign, AStatic]);
 			case [{tok: Const(CIdent(s))}]: {
 					switch stream {
 						// setter
@@ -208,10 +210,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 									// method (no-args)
 									case [{tok: Line, pos: p}]: {
 											data = makeMethod(s, [], p);
-											// return switch stream {
-											// 	case [{tok: BrClose}]: data;
-											// 	case _: throw 'unclosed block at class $s';
-											// }
+											
 										}
 									// Getter
 									case [{tok: Const(c), pos: p}]: {
@@ -319,28 +318,61 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 	function parseParamNames() {
 		return switch stream {
 			case [{tok: Const(x), pos: p}]: {
+					switch stream {
+						case [{tok:Line}]:{} //ignore
+						case _:
+					}
 					switch x {
 						case CIdent(s): CIdent(s);
 						case _: throw 'invalid argument at $p';
 					}
 				}
 			case [{tok: Kwd(k), pos: p}]: throw 'invalid argument ${KeywordPrinter.toString(k)} at $p';
-			case [{tok: Comma}]: parseParamNames();
+			case [{tok: Comma}]: {
+				switch stream {
+					case [{tok:Line}]:{} //ignore
+					case _:
+				}
+				parseParamNames();
+			}
+			case [{tok:Line}]: null;
 		}
 	}
 
-	function parseConstructor() {
+	
+	function parseMethodWithAccess(access:Array<Access>) {
 		return switch stream {
 			case [
-				{tok: Const(CIdent(s))},
-				{tok: POpen},
-				params = parseRepeat(parseParamNames),
-				{tok: PClose, pos: p2}
+				{tok: Const(CIdent(s))}
 			]: {
-					var cName = s;
+					var params = [];
 					switch stream {
-						case [{tok: BrOpen}]: {
-								var code = [];
+						case [{tok: POpen},
+							_params = parseRepeat(parseParamNames)]: {
+								while(true){
+									switch stream {
+										case [{tok: PClose, pos: p2}]: params = _params;
+										case [{tok:Line}]: //ignore
+										case _: break;
+									}
+								}
+							}
+						case [{tok:Line}]: //ignore	
+						case _: {
+							switch access {
+								case [AConstructor]: {
+									throw "Error at 'new': A constructor cannot be a getter.";
+								}
+								case _:
+							}
+						}
+					}
+					var cName = s;
+					
+					switch stream {
+						case [{tok: BrOpen, pos: p2}]: {
+							var code = [];
+								
 								while (true) {
 									switch stream {
 										case [{tok: Kwd(KwdImport), pos: p1}]:
@@ -358,16 +390,17 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 											}
 										case [{tok: BrClose}]: break;
 										case [{tok: Eof}]:
-											throw 'unclosed block at constructor ${cName}() \u2190';
+											throw 'unclosed block at ${[for(a in access) AccessPrinter.toString(a)].join(" ")} ${cName}() \u2190';
 										case _: {
-												throw 'unclosed block at constructor ${cName}() \u2190';
+												throw 'unclosed block at ${[for(a in access) AccessPrinter.toString(a)].join(" ")} ${cName}() \u2190';
 											}
 									}
 								}
+								
 								return {
 									name: cName,
 									doc: null,
-									access: [AConstructor],
+									access: access,
 									kind: FMethod(params, code),
 									pos: p2
 								};
@@ -379,10 +412,13 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 
 	function getExpr() {
 		return switch stream {
+			case [{tok:Kwd(KwdSuper), pos: p}]: parseExpr({expr: EConst(CIdent("super")), pos: p});
+			case [{tok:Kwd(KwdThis), pos: p}]: parseExpr({expr: EConst(CIdent("this")), pos: p});
 			case [{tok: Const(c), pos: p2}]: parseExpr({expr: EConst(c), pos: p2});
 			case [{tok: Kwd(KwdNull), pos: p}]: {expr: ENull, pos: p};
 			case [{tok: Kwd(KwdFalse), pos: p}]: parseExpr({expr: EConst(CIdent("false")), pos: p});
 			case [{tok: Kwd(KwdTrue), pos: p}]: parseExpr({expr: EConst(CIdent("true")), pos: p});
+			case [{tok: POpen}, exp = getExpr(), {tok:PClose}]: exp;
 		}
 	}
 
@@ -549,6 +585,14 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 			case [{tok: Line}]: parseStatement();
 			case [{tok: Kwd(KwdNull), pos: p}]: parseStatement();
 			case [{tok: Kwd(KwdBreak), pos: p}]: {expr: EBreak, pos: p};
+			case [{tok: Kwd(KwdReturn), pos:p}]: {
+				var retVal = null;
+				switch stream {
+					case [exp = getExpr()]: retVal = exp;
+					case _:
+				}
+				return {expr: EReturn(retVal), pos:p};
+			}
 			// case [{tok:Kwd(KwdContinue), pos: p}]: {expr: EContinue, pos:p};
 			case _: null;
 		}
@@ -628,8 +672,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 								var args = [];
 								while (true) {
 									switch stream {
-										case [{tok: Const(c), pos: p}]: {
-												var exp = parseExpr({expr: EConst(c), pos: p});
+										case [exp = getExpr()]: {
 												args.push(exp);
 											}
 										case [{tok: Kwd(KwdFalse), pos: p}]: args.push(parseExpr({expr: EConst(CIdent("false")), pos: p}));
@@ -693,13 +736,22 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 									// method get a.field
 									case [{tok: Const(CIdent(a)), pos: p}]: {
 											if (peek(0).toString() != "<newline>") { // a.field()
+
 												// method call
 												switch stream {
 													case [{tok: POpen, pos: pp}]: {
 															var args = [];
 															while (true) {
+																
 																switch stream {
-																	case [{tok: Comma}]: continue;
+																	case [{tok: Comma}]: {
+																		switch stream {
+																			case [{tok:Line}]: {} // ignore
+																			case _:
+																		}
+																		continue;
+																	}
+																	case [{tok:Line}]: {} // ignore
 																	case [{tok: Kwd(KwdFalse), pos: p}]: args.push(parseExpr({
 																			expr: EConst(CIdent("false")),
 																			pos: p
@@ -709,7 +761,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 																			pos: p
 																		}));
 																	case [{tok: Kwd(KwdNull), pos: p}]: args.push({expr: ENull, pos: p});
-																	case [{tok: Const(c), pos: p}]: args.push(parseExpr({expr: EConst(c), pos: p}));
+																	case [exp = getExpr()]: args.push(getExpr());
 																	case [{tok: PClose}]: break;
 																	case _: "Expect ')'";
 																}
@@ -725,6 +777,39 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 														{
 															var exp = parseExpr({expr: EConst(CIdent(x)), pos: p2});
 															return {expr: EField(exp, '$s.$a.$x'), pos: p};
+														}
+													// method call with block parameter
+													case [{tok: BrOpen, pos: pp}]: {
+															var args = [];
+
+															switch stream {
+																case [{tok: Binop(OpOr)}]: {
+																		while (true) {
+																			switch stream {
+																				case [{tok: Binop(OpOr)}]: break;
+																				case [{tok: Comma}]: continue;
+																				case [{tok: Const(c), pos: p3}]: args.push({expr: EConst(c), pos: p3});
+																				case _: throw "Expected '|' in block parameter";
+																			}
+																		}
+																	}
+																case _:
+															}
+
+															var body = parseStatement();
+	
+															while (true) {
+																switch stream {
+																	case [{tok: Line}]: continue;
+																	case [{tok: BrClose, pos: p1}]: break;
+																	case _: throw "Expected } at block parameter";
+																}
+															}
+															var exp = body != null ? {
+																expr: EBlockParam({expr: ECall(e, args), pos: pp}, body),
+																pos: body.pos
+															} : {expr: ENull, pos: {min: 0, max: 0, file: ""}};
+															return {expr: EField(exp, '$s.$a'), pos: pp};
 														}
 													case _:
 												}
@@ -758,7 +843,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 									case {tok: Line}: {
 											return e;
 										}
-									case {tok:Const(c)}: throw 'Expect end of file';
+									case {tok: Const(c)}: throw 'Expect end of file';
 									case _: e;
 								}
 							}
