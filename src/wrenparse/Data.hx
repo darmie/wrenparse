@@ -475,7 +475,7 @@ enum TokenDef {
 	Comment(s:String);
 	CommentLine(s:String);
 	IntInterval(s:String, ?extra:Bool);
-	Interpol(s:String); // string interpolation
+	Interpol; // string interpolation
 	Const(c:Constant);
 	Kwd(k:Keyword);
 	Error(s:String);
@@ -525,7 +525,7 @@ class TokenDefPrinter {
 			case Dot: ".";
 			case DblDot: ":";
 			case Question: "?";
-			case Interpol(s): '%$s';
+			case Interpol: '%(';
 			case Comment(s): '/*$s*/';
 			case CommentLine(s): '//$s';
 			case IntInterval(s): '$s...';
@@ -649,6 +649,7 @@ typedef ParamDecl = {
 
 enum ClassFlag {
 	HExtends(t:String);
+	HForeign;
 }
 
 enum ImportMode {

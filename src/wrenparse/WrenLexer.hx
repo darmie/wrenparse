@@ -49,12 +49,12 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 	public static var tok = @:rule [
 		"" => mk(lexer, Eof),
 		"[\r\t ]+" => {
-				var space = lexer.current;
-				var token:Token = lexer.token(tok);
-				token.space = space;
-				token;
+			var space = lexer.current;
+			var token:Token = lexer.token(tok);
+			token.space = space;
+			token;
 		},
-		"[\n]+" =>  mk(lexer, Line),
+		"[\n]+" => mk(lexer, Line),
 		"0x[0-9a-fA-F]+" => mk(lexer, Const(CInt(lexer.current))),
 		integer => mk(lexer, Const(CInt(lexer.current))),
 		integer + "\\.[0-9]+" => mk(lexer, Const(CFloat(lexer.current))),
@@ -63,13 +63,7 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 		integer + "\\.[0-9]*[eE][\\+\\-]?[0-9]+" => mk(lexer, Const(CFloat(lexer.current))),
 		integer + "\\.\\." => mk(lexer, IntInterval(lexer.current.substr(0, -2), false)),
 		integer + "\\.\\.\\." => mk(lexer, IntInterval(lexer.current.substr(0, -3), true)),
-		"//[^\n\r]*" => {
-			var space = "";
-			var token:Token = lexer.token(tok);
-			token.space = space;
-			token;
-			//mk(lexer, CommentLine(lexer.current.substr(2)))
-		},
+		"//[^\n\r]*" => mk(lexer, CommentLine(lexer.current.substr(2))),
 		"~" => mk(lexer, Unop(OpNegBits)),
 		"<<" => mk(lexer, Binop(OpShl)),
 		">>" => mk(lexer, Binop(OpShl)),
@@ -110,7 +104,15 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 			token.pos.min = pmin.pmin;
 			token;
 		},
-		"%[_a-zA-Z0-9]*" => mk(lexer, Interpol(lexer.current.substr(1))),
+		'/\\*' => {
+			buf = new StringBuf();
+			var pmin = lexer.curPos();
+			var pmax = try lexer.token(comment) catch (e:haxe.io.Eof) throw new LexerError(UnclosedComment, mkPos(pmin));
+			var token = mk(lexer, Comment(buf.toString()));
+			token.pos.min = pmin.pmin;
+			token;
+		},
+		"%\\(" => mk(lexer, Interpol),
 		ident => {
 			var kwd = keywords.get(lexer.current);
 			if (kwd != null)
@@ -134,69 +136,106 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 			lexer.token(string);
 		},
 		'"' => lexer.curPos().pmax,
-		// "%(" => {
-		// 	var pmin = lexer.curPos();
-		// 	buf.add(lexer.current);
-		// 	try
-		// 		lexer.token(codeString)
-		// 	catch (e:haxe.io.Eof)
-		// 		throw new LexerError(UnclosedCode, mkPos(pmin));
-		// 	lexer.token(string);
-		// },
+		"%\\(" => {
+			var pmin = lexer.curPos();
+			buf.add(lexer.current);
+			try {
+				lexer.token(codeString);
+			} catch (e:haxe.io.Eof)
+				throw new LexerError(UnclosedCode, mkPos(pmin));
+			lexer.token(string);
+		},
 		"[^\\\\\"]+" => {
 			buf.add(lexer.current);
 			lexer.token(string);
 		}
 	];
 
-	// public static var codeString = @:rule [
-	// 	"(|/" => {
-	// 		buf.add(lexer.current);
-	// 		lexer.token(codeString);
-	// 	},
-	// 	")" => {
-	// 		buf.add(lexer.current);
-	// 	},
-	// 	'"' => {
-	// 		buf.addChar('"'.code);
-	// 		var pmin = lexer.curPos();
-	// 		try
-	// 			lexer.token(string)
-	// 		catch (e:haxe.io.Eof)
-	// 			throw new LexerError(UnterminatedString, mkPos(pmin));
-	// 		buf.addChar('"'.code);
-	// 		lexer.token(codeString);
-	// 	},
-	// 	'/\\*' => {
-	// 		var pmin = lexer.curPos();
-	// 		try
-	// 			lexer.token(comment)
-	// 		catch (e:haxe.io.Eof)
-	// 			throw new LexerError(UnclosedComment, mkPos(pmin));
-	// 		lexer.token(codeString);
-	// 	},
-	// 	"//[^\n\r]*" => {
-	// 		buf.add(lexer.current);
-	// 		lexer.token(codeString);
-	// 	},
-	// 	"[^/\"'()\n\r]+" => {
-	// 		buf.add(lexer.current);
-	// 		lexer.token(codeString);
-	// 	},
-	// 	"[\r\n\t ]+" => {
-	// 		buf.add(lexer.current);
-	// 		lexer.token(codeString);
-	// 	}
-	// ];
+	public static var codeString = @:rule [
+		"\\(" => {
+			buf.add(lexer.current);
+			lexer.token(codeString);
+		},
+		"\\)" => {
+			buf.add(lexer.current);
+		},
+		'"' => {
+			buf.addChar('"'.code);
+			var pmin = lexer.curPos();
+			try
+				lexer.token(string)
+			catch (e:haxe.io.Eof)
+				throw new LexerError(UnterminatedString, mkPos(pmin));
+			buf.addChar('"'.code);
+			lexer.token(codeString);
+		},
+		// '/\\*' => {
+		// 	var pmin = lexer.curPos();
+		// 	try
+		// 		lexer.token(comment)
+		// 	catch (e:haxe.io.Eof)
+		// 		throw new LexerError(UnclosedComment, mkPos(pmin));
+		// 	lexer.token(codeString);
+		// },
+		// "//[^\n\r]*" => {
+		// 	buf.add(lexer.current);
+		// 	lexer.token(codeString);
+		// },
+		// "[^/\"'()\n\r]+" => {
+		// 	buf.add(lexer.current);
+		// 	lexer.token(codeString);
+		// },
+		"[\r\n\t ]+" => {
+			buf.add(lexer.current);
+			lexer.token(codeString);
+		}
+	];
 	public static var comment = @:rule [
-		"*/" => lexer.curPos().pmax,
+		"\\*/" => {
+			trace(lexer.input.readString(lexer.curPos().pmax, 3));
+			lexer.curPos().pmax;
+		},
+		'[^/\\*]+' => {
+			trace(lexer.current);
+			buf.add(lexer.current);
+			// var tok = lexer.token(comment2);
+			// // nested comment
+			// buf.add(lexer.current);
+			try lexer.token(comment2) catch(e:haxe.io.Eof) throw new LexerError(UnclosedComment, mkPos(lexer.curPos()));
+			// buf.add(lexer.current);
+			// // buf.add(lexer.current.substr(0, -2));
+			lexer.token(comment);
+		},
 		"*" => {
 			buf.add("*");
 			lexer.token(comment);
 		},
+		// "[\r\n\t ]+" => {
+		// 	lexer.token(comment);
+		// },
 		"[^\\*]+" => {
 			buf.add(lexer.current);
 			lexer.token(comment);
+		}
+	];
+
+	public static var comment2 = @:rule [
+	"\\*/" => {
+			trace(lexer.input.readString(lexer.curPos().pmax, 2));
+			lexer.curPos().pmax;
+		},
+		'/\\*' => {
+			// nested comment
+			buf.add(lexer.current);
+			lexer.token(comment2);
+		},
+		"*" => {
+			buf.add("*");
+			lexer.token(comment2);
+		},
+		"[^\\*]+" => {
+			buf.add(lexer.current);
+			lexer.token(comment2);
 		}
 	];
 

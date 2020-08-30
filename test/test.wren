@@ -1,6 +1,9 @@
 import "beverages"
 import "desserts" for Tiramisu, IceCream
-		
+
+// foreign object
+foreign class NativeObject {}
+
 class Person {}
 class Boy is Person {
 	construct new(){
@@ -9,11 +12,10 @@ class Boy is Person {
 		}
 		super.a
 	}
-	name=(val){}
+	name=(val){"hello"}
+	
 	name{"boy"}
-	foreign static runner{
-		1 * 2
-	}
+	foreign static runner{}
 	method(var1, var2){
 		var b = {
 			"k": var1,
@@ -43,7 +45,7 @@ class Boy is Person {
 			var i = seq_.iteratorValue(iter_)
 			System.print(i)
 		}		
-		if(a & 3 == 1 && b % 5 && c == {"k": 4}){ // todo: parse c == {"k": 4}
+		if(a & 3 == 1 && b % 5 && c == {"k": 4}){ 
 			1*2
 			0
 			1234
@@ -84,5 +86,20 @@ class Boy is Person {
 		newFn.new{a}
 
 		System.print((2 * (6 - (2 + 2))))
+
+		10.sin // sin value of 10
+		[1, 2, 3].isEmpty //> false
+		System.print({"key":"value"}.containsKey("key"))
 	}
 }
+// /*
+// 	/* Block comment */
+// */
+var arr = [
+  1,
+  2,
+  3
+]
+
+
+System.print("%(interpolate)")
