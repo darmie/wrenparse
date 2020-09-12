@@ -91,6 +91,25 @@ class Boy is Person {
 		[1, 2, 3].isEmpty //> false
 		System.print({"key":"value"}.containsKey("key"))
 	}
+
+	+(other) { "infix + %(other)" }
+	-(other) { "infix - %(other)" }
+	*(other) { "infix * %(other)" }
+	/(other) { "infix / %(other)" }
+	%(other) { "infix \% %(other)" }
+	<(other) { "infix < %(other)" }
+	>(other) { "infix > %(other)" }
+	<=(other) { "infix <= %(other)" }
+	>=(other) { "infix >= %(other)" }
+	==(other) { "infix == %(other)" }
+	!=(other) { "infix != %(other)" }
+	&(other) { "infix & %(other)" }
+	|(other) { "infix | %(other)" }
+	is(other) { "infix is %(other)" }
+
+	! { "prefix !" }
+	~ { "prefix ~" }
+	- { "prefix -" }
 }
 // /*
 // 	/* Block comment */

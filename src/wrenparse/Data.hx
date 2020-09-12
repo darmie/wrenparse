@@ -153,6 +153,11 @@ enum Binop {
 		`in`
 	**/
 	OpIn;
+
+	/**
+	 *  `is`
+	 */
+	OpIs;
 }
 
 enum Constant {
@@ -510,6 +515,7 @@ class TokenDefPrinter {
 			case OpInterval2: "...";
 			case OpArrow: "=>";
 			case OpIn: "in";
+			case OpIs: "is";
 			case OpAssignOp(op):
 				printBinop(op) + "=";
 		}
@@ -595,7 +601,7 @@ enum FieldType {
 
 enum FieldOp {
 	FInfixOp(sign:Binop, arg:Constant, body:Array<Dynamic>);
-	FPrefixOp(sign:Unop, body:Array<Dynamic>);
+	FPrefixOp(sign:Unop, body:Array<CodeDef>);
 	FSubscriptOp(params:Array<Constant>, body:Array<Dynamic>);
 }
 

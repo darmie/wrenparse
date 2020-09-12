@@ -265,6 +265,8 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 						b.add("\r");
 					case 't'.code:
 						b.add("\t");
+					case '%'.code:
+						b.add("\\%");
 					case '"'.code | '\''.code | '\\'.code:
 						b.addChar(c);
 					case _ >= '0'.code && _ <= '3'.code => true:

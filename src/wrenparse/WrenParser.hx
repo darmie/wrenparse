@@ -67,8 +67,10 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 					{
 						code.push(parseClass(p, true));
 					}
-				case [{tok:Comment(s)}]: continue;
-				case [{tok:CommentLine(s)}]: continue;
+				case [{tok: Comment(s)}]:
+					continue;
+				case [{tok: CommentLine(s)}]:
+					continue;
 				case [{tok: Line}]:
 					code = code.concat(parseModule());
 				case [{tok: Eof}]:
@@ -233,14 +235,163 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							}
 					}
 				}
+			case [p = parseOpOverload()]: p;
 			case [{tok: Line}]: parseClassField();
 			case _: null;
 		}
 	}
 
+	function parseOpOverload() {
+		return switch stream {
+			// op { body }
+			case [{tok: Unop(op)}, {tok: BrOpen, pos: p}]: {
+					var code = [];
+					var name = TokenDefPrinter.toString(Unop(op));
+					while (true) {
+						code.push(getCodeDef());
+						switch stream {
+							case [{tok: BrClose}]:
+								{
+									break;
+								}
+							case [{tok: CommentLine(s)}]:
+								continue;
+							case [{tok: Eof}]:
+								throw 'unclosed block at operator ${name} \u2190';
+						}
+					}
+					return {
+						name: name,
+						doc: null,
+						access: [],
+						kind: FOperator(FPrefixOp(op, code)),
+						pos: p
+					}
+				}
+			case [{tok: Binop(op)}]: {
+					return switch stream {
+						// op(other) { body }
+						case [{tok: POpen}, {tok: Const(CIdent(other))}, {tok: PClose}, {tok: BrOpen, pos: p}]: {
+								var code = [];
+								var name = TokenDefPrinter.toString(Binop(op));
+								while (true) {
+									code.push(getCodeDef());
+									switch stream {
+										case [{tok: BrClose}]:
+											{
+												break;
+											}
+										case [{tok: CommentLine(s)}]:
+											continue;
+										case [{tok: Eof}]:
+											throw 'unclosed block at operator ${name} \u2190';
+									}
+								}
+								return {
+									name: name,
+									doc: null,
+									access: [],
+									kind: FOperator(FInfixOp(op, CIdent(other), code)),
+									pos: p
+								}
+							}
+						case [{tok: BrOpen, pos: p}]: {
+								if (op == OpSub) {
+									var code = [];
+									var name = "-";
+									while (true) {
+										code.push(getCodeDef());
+										switch stream {
+											case [{tok: BrClose}]:
+												{
+													break;
+												}
+											case [{tok: CommentLine(s)}]:
+												continue;
+											case [{tok: Eof}]:
+												throw 'unclosed block at operator ${name} \u2190';
+										}
+									}
+									return {
+										name: name,
+										doc: null,
+										access: [],
+										kind: FOperator(FPrefixOp(OpNeg, code)),
+										pos: p
+									}
+								} else {
+									throw unexpected();
+								}
+							}
+					}
+				}
+
+			case [
+				{tok: Interpol},
+				{tok: Const(CIdent(other))},
+				{tok: PClose},
+				{tok: BrOpen, pos: p}
+			]: {
+					var code = [];
+					var name = "%";
+					while (true) {
+						code.push(getCodeDef());
+						switch stream {
+							case [{tok: BrClose}]:
+								{
+									break;
+								}
+							case [{tok: CommentLine(s)}]:
+								continue;
+							case [{tok: Eof}]:
+								throw 'unclosed block at operator ${name} \u2190';
+						}
+					}
+					return {
+						name: name,
+						doc: null,
+						access: [],
+						kind: FOperator(FInfixOp(OpMod, CIdent(other), code)),
+						pos: p
+					}
+				}
+			// is(other) { body }
+			case [
+				{tok: Kwd(KwdIs)},
+				{tok: POpen},
+				{tok: Const(CIdent(other))},
+				{tok: PClose},
+				{tok: BrOpen, pos: p}
+			]: {
+					var code = [];
+					var name = "is";
+					while (true) {
+						code.push(getCodeDef());
+						switch stream {
+							case [{tok: BrClose}]:
+								{
+									break;
+								}
+							case [{tok: CommentLine(s)}]:
+								continue;
+							case [{tok: Eof}]:
+								throw 'unclosed block at operator ${name} \u2190';
+						}
+					}
+					return {
+						name: name,
+						doc: null,
+						access: [],
+						kind: FOperator(FInfixOp(OpIs, CIdent(other), code)),
+						pos: p
+					}
+				}
+		}
+	}
+
 	function makeMethod(name, args:Array<Constant>, pos) {
 		var code = [];
-		
+
 		while (true) {
 			code.push(getCodeDef());
 			switch stream {
@@ -280,7 +431,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 				{
 					var code = parseRepeat(getCodeDef);
 					switch stream {
-						case [{tok:BrClose}]: 
+						case [{tok: BrClose}]:
 						case [{tok: Eof}]:
 							throw 'unclosed block at setter ${name} \u2190';
 						case _: {
@@ -313,8 +464,8 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 					parseClass(p, true);
 				}
 			case [{tok: Line}]:
-					parseStatements();
-			case [{tok: CommentLine(s)}]:parseStatements();
+				parseStatements();
+			case [{tok: CommentLine(s)}]: parseStatements();
 			case [exp = getExpr()]: EStatement([exp]);
 		}
 	}
@@ -1092,21 +1243,22 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 	}
 }
 
-
 class StringParser extends WrenParser {
-	public function new(s:String){
+	public function new(s:String) {
 		var source = byte.ByteData.ofString(s);
 		super(source);
 	}
 
-	public function exec(){
+	public function exec() {
 		var exp = [];
-		while(true){
+		while (true) {
 			switch stream {
-				case [{tok:Interpol}]:{
-					exp.push(getExpr());
-				}
-				case [{tok:PClose}]: break;
+				case [{tok: Interpol}]:
+					{
+						exp.push(getExpr());
+					}
+				case [{tok: PClose}]:
+					break;
 			}
 		}
 		return exp;
