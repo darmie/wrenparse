@@ -110,6 +110,18 @@ class Boy is Person {
 	! { "prefix !" }
 	~ { "prefix ~" }
 	- { "prefix -" }
+
+	[index] {
+    	System.print("Unicorns are not lists!")
+  	}
+
+  	[x, y] {
+    	System.print("Unicorns are not matrices either!")
+  	}
+
+	[index]=(value) {
+    	System.print("You can't stuff %(value) into me at %(index)!")
+    }
 }
 // /*
 // 	/* Block comment */

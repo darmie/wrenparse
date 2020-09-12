@@ -386,6 +386,65 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 						pos: p
 					}
 				}
+			// Subscript ops, myclass[value] or  myClass[value] = (other)
+			case [{tok: BkOpen}]: {
+					var subscript_params = [];
+					var code = [];
+					var pos = null;
+					var arg = null;
+					while (true) {
+						switch stream {
+							case [{tok: Const(CIdent(s))}]: subscript_params.push(CIdent(s));
+							case [{tok: Comma}]: continue;
+							case [{tok: BkClose}]: break;
+						}
+					}
+					switch stream {
+						// setter
+						case [{tok: Binop(OpAssign)},{tok: POpen}, {tok: Const(CIdent(other))}, {tok: PClose}, {tok: BrOpen, pos: p}]: {
+								pos = p;
+								arg = CIdent(other);
+								while (true) {
+									code.push(getCodeDef());
+									switch stream {
+										case [{tok: BrClose}]:
+											{
+												break;
+											}
+										case [{tok: CommentLine(s)}]:
+											continue;
+										case [{tok: Eof}]:
+											throw 'unclosed block at operator [${subscript_params.join(",")}]=($other) \u2190';
+									}
+								}
+							}
+						// getter
+						case [{tok: BrOpen, pos: p}]: {
+								pos = p;
+								while (true) {
+									code.push(getCodeDef());
+									switch stream {
+										case [{tok: BrClose}]:
+											{
+												break;
+											}
+										case [{tok: CommentLine(s)}]:
+											continue;
+										case [{tok: Eof}]:
+											throw 'unclosed block at operator [${subscript_params.join(",")}] \u2190';
+									}
+								}
+							}
+					}
+
+					return return {
+						name: "",
+						doc: null,
+						access: [],
+						kind: FOperator(FSubscriptOp(subscript_params, arg, code)),
+						pos: pos
+					}
+				}
 		}
 	}
 

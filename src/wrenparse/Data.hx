@@ -600,9 +600,9 @@ enum FieldType {
 }
 
 enum FieldOp {
-	FInfixOp(sign:Binop, arg:Constant, body:Array<Dynamic>);
+	FInfixOp(sign:Binop, arg:Constant, body:Array<CodeDef>);
 	FPrefixOp(sign:Unop, body:Array<CodeDef>);
-	FSubscriptOp(params:Array<Constant>, body:Array<Dynamic>);
+	FSubscriptOp(params:Array<Constant>, arg:Constant, body:Array<CodeDef>);
 }
 
 enum Access {
