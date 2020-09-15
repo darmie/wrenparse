@@ -1,14 +1,15 @@
 {
   "name": "wrenparse",
-  "url" : "https://github.com/YOUR_NAME/wrenparse/",
+  "url" : "https://github.com/darmie/wrenparse/",
   "license": "MIT",
-  "tags": ["haxe","js"],
-  "description": "description of wrenparse",
+  "tags": ["haxe","cpp", "js", "neko", "macro", "cs", "java", "php", "cross"],
+  "description": "A parser for the wren programming language",
   "classPath": "src",
   "version": "0.0.1",
-  "releasenote": "Initial release",
-  "contributors": ["YOUR_NAME"],
+  "releasenote": "Initial release. [WIP]",
+  "contributors": ["darmie"],
   "dependencies": {
-
+    "hxcpp": "",
+    "hxparse":""
   }
 }

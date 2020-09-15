@@ -91,6 +91,37 @@ class Boy is Person {
 		[1, 2, 3].isEmpty //> false
 		System.print({"key":"value"}.containsKey("key"))
 	}
+
+	+(other) { "infix + %(other)" }
+	-(other) { "infix - %(other)" }
+	*(other) { "infix * %(other)" }
+	/(other) { "infix / %(other)" }
+	%(other) { "infix \% %(other)" }
+	<(other) { "infix < %(other)" }
+	>(other) { "infix > %(other)" }
+	<=(other) { "infix <= %(other)" }
+	>=(other) { "infix >= %(other)" }
+	==(other) { "infix == %(other)" }
+	!=(other) { "infix != %(other)" }
+	&(other) { "infix & %(other)" }
+	|(other) { "infix | %(other)" }
+	is(other) { "infix is %(other)" }
+
+	! { "prefix !" }
+	~ { "prefix ~" }
+	- { "prefix -" }
+
+	[index] {
+    	System.print("Unicorns are not lists!")
+  	}
+
+  	[x, y] {
+    	System.print("Unicorns are not matrices either!")
+  	}
+
+	[index]=(value) {
+    	System.print("You can't stuff %(value) into me at %(index)!")
+    }
 }
 // /*
 // 	/* Block comment */
