@@ -1,6 +1,6 @@
 
--cp src/
--cp test/
+-cp src
+-cp test
 
 -main Test
 
@@ -8,10 +8,10 @@
 -lib hxparse
 
 # --each
---interp
+# --interp
 
 # --next
-# --cpp bin/cpp
+--cpp bin/cpp
 
-# --cmd bin/cpp/Test
+--cmd bin\cpp\Test
 
