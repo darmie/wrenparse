@@ -190,54 +190,30 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 			lexer.token(codeString);
 		}
 	];
+
+	static var commentBuf:StringBuf;
 	public static var comment = @:rule [
 		"\\*/" => {
-			trace(lexer.input.readString(lexer.curPos().pmax, 3));
 			lexer.curPos().pmax;
 		},
-		'[^/\\*]+' => {
-			trace(lexer.current);
+		'[^/\\*]+[^]' => {
 			buf.add(lexer.current);
-			// var tok = lexer.token(comment2);
-			// // nested comment
-			// buf.add(lexer.current);
-			try lexer.token(comment2) catch(e:haxe.io.Eof) throw new LexerError(UnclosedComment, mkPos(lexer.curPos()));
-			// buf.add(lexer.current);
-			// // buf.add(lexer.current.substr(0, -2));
 			lexer.token(comment);
 		},
 		"*" => {
 			buf.add("*");
 			lexer.token(comment);
 		},
-		// "[\r\n\t ]+" => {
-		// 	lexer.token(comment);
-		// },
+		"[\r\n\t ]+" => {
+			lexer.token(comment);
+		},
 		"[^\\*]+" => {
 			buf.add(lexer.current);
 			lexer.token(comment);
 		}
 	];
 
-	public static var comment2 = @:rule [
-	"\\*/" => {
-			trace(lexer.input.readString(lexer.curPos().pmax, 2));
-			lexer.curPos().pmax;
-		},
-		'/\\*' => {
-			// nested comment
-			buf.add(lexer.current);
-			lexer.token(comment2);
-		},
-		"*" => {
-			buf.add("*");
-			lexer.token(comment2);
-		},
-		"[^\\*]+" => {
-			buf.add(lexer.current);
-			lexer.token(comment2);
-		}
-	];
+
 
 	static inline function unescapePos(pos:Position, index:Int, length:Int) {
 		return {

@@ -123,9 +123,10 @@ class Boy is Person {
     	System.print("You can't stuff %(value) into me at %(index)!")
     }
 }
-// /*
-// 	/* Block comment */
-// */
+/*
+	/* Block comment */
+	/* Block comment2 *//* Block comment3 */
+*/
 var arr = [
   1,
   2,
