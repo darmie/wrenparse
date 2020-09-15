@@ -15,6 +15,7 @@ install:
   - yes | haxelib install all
 
 script:
+  - npm i
   - npm run lix use haxe 4.1.2
   - npm run haxe build.hxml
 
