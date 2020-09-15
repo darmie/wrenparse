@@ -1,5 +1,5 @@
-# wrenparse
-Wren-lang parser implemented in Haxe
+# wrenparse    ![](https://travis-ci.com/darmie/wrenparse.svg?branch=master)
+Wren-lang parser implemented in Haxe 
 
 ### Dependencies
 
