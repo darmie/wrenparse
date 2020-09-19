@@ -600,7 +600,7 @@ enum FieldType {
 enum FieldOp {
 	FInfixOp(sign:Binop, arg:Constant, body:Array<StatementDef>);
 	FPrefixOp(sign:Unop, body:Array<StatementDef>);
-	FSubscriptOp(params:Array<Constant>, arg:Constant, body:Array<StatementDef>);
+	FSubscriptOp(params:Array<Constant>, rhs:FieldType);
 }
 
 enum Access {

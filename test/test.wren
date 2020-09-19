@@ -1,11 +1,25 @@
-import 
-import "desserts" for Tiramisu, 
+import "beverages"
+import "desserts" for Tiramisu, IceCream
 
 // foreign object
 foreign class NativeObject {}
 
-class Person {}
-class Boy is Person {
+class Person {
+    construct new(){}
+    static runner(){}
+    setter=(val){}
+    getter{}
+    method(c, b){}
+    foreign static item()
+
+    +(other) { }
+    ! { }
+    [index] {}
+    [index]=(value) {}
+    [x, y]=(value) {}
+    is(item){}
+}
+
 // class Boy is Person {
 // 	construct new(){
 // 	    if(a){

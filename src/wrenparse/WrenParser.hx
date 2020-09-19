@@ -40,24 +40,23 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 
 	public function parse():Array<Statement> {
 		var ret = parseRepeat(parseStatements);
-		
-		if (errors.length > 0){
+
+		if (errors.length > 0) {
 			return errors;
 		}
 		return ret;
 	}
 
 	function parseStatements():Statement {
-			return switch stream {
-				case [{tok: Eof}]: throw new hxparse.NoMatch<Dynamic>(curPos(), peek(0));
-				case [{tok: Line}]: parseStatements();
-				case [{tok: Comment(s)}]: parseStatements();
-				case [{tok: CommentLine(s)}]: parseStatements();
-				case [importStmt = parseImport()]: importStmt;
-				case [classStmt = parseClass()]: classStmt;
-				case [{tok: Kwd(KwdForeign)}, classStmt = parseClass(true)]: classStmt;
-			}
-		
+		return switch stream {
+			case [{tok: Eof}]: throw new hxparse.NoMatch<Dynamic>(curPos(), peek(0));
+			case [{tok: Line}]: parseStatements();
+			case [{tok: Comment(s)}]: parseStatements();
+			case [{tok: CommentLine(s)}]: parseStatements();
+			case [importStmt = parseImport()]: importStmt;
+			case [classStmt = parseClass()]: classStmt;
+			case [{tok: Kwd(KwdForeign)}, classStmt = parseClass(true)]: classStmt;
+		}
 	}
 
 	function parseImport():Statement {
@@ -68,13 +67,15 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 						case [{tok: Const(CString(name)), pos: p}]:
 							pos = {min: pos.min, max: p.max, file: p.file};
 							name;
-						case _: errors.push(SError('Error at ${peek(0)}: Expect a string after \'import\' \u2190', p)); null;
+						case _:
+							errors.push(SError('Error at ${peek(0)}: Expect a string after \'import\' \u2190', p));
+							null;
 					}
 
 					var variables = [];
 					while (true) {
 						switch stream {
-							case [{tok: Kwd(KwdFor), pos:p}]:
+							case [{tok: Kwd(KwdFor), pos: p}]:
 								{
 									var isFin = false;
 									while (true) {
@@ -83,8 +84,11 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 											case [{tok: Comma, pos: p}]: {
 													switch stream {
 														case [{tok: Const(CIdent(name)), pos: p}]: variables.push(name);
-													
-														case _: errors.push(SError('Error at ${peek(0)}: Expect a constant after \'import "$importName" for ${variables.join(",")}\' \u2190', p)); isFin=true;
+
+														case _:
+															errors.push(SError('Error at ${peek(0)}: Expect a constant after \'import "$importName" for ${variables.join(",")}\' \u2190',
+																p));
+															isFin = true;
 													}
 												}
 											case [{tok: Line, pos: p}]:
@@ -93,7 +97,9 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 											case [{tok: Eof, pos: p}]:
 												pos = {min: pos.min, max: p.max, file: p.file};
 												isFin = true;
-											case _: errors.push(SError('Error at ${peek(0)}: Expect a constant after \'import "$importName" for\'', p)); isFin=true;
+											case _:
+												errors.push(SError('Error at ${peek(0)}: Expect a constant after \'import "$importName" for\'', p));
+												isFin = true;
 										}
 										if (isFin)
 											break;
@@ -165,79 +171,311 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 
 	function parseClassField():ClassField {
 		return switch stream {
-			// case [{tok: Kwd(KwdConstruct)}]: parseMethodWithAccess([AConstructor]); // constructor
-			// case [{tok: Kwd(KwdStatic)}]: parseMethodWithAccess([AStatic]);// static field
-			// case [{tok: Kwd(KwdForeign)}, {tok: Kwd(KwdStatic)}]: parseMethodWithAccess([AForeign, AStatic]); // static foreign field
-			// case [opOverloading = parseOpOverloading()]: opOverloading; // op overloading
-			// case [getterSetter = parseSetterGetter()]: getterSetter; // getterSetter;
+			case [{tok: Kwd(KwdConstruct)}, construct = parseConstructor()]: construct; // constructor
+			case [{tok: Kwd(KwdStatic)}, {tok: Const(CIdent(s))}, f = parseStaticFields(s)]: f; // static field
+			case [
+				{tok: Kwd(KwdForeign)},
+				{tok: Kwd(KwdStatic)},
+				{tok: Const(CIdent(s))},
+				f = parseStaticForeignFields(s)
+			]: f; // static foreign field
+			case [opOverloading = parseOpOverloading()]: opOverloading; // op overloading
 			case [{tok: Line}]: parseClassField();
 			case [{tok: Comment(s)}]: parseClassField();
 			case [{tok: CommentLine(s)}]: parseClassField();
+			case [{tok: Const(CIdent(s))}]: {
+					return switch stream {
+						case [getterSetter = parseSetterGetter(s)]: getterSetter; // getterSetter;
+						case [method = parseMethod(s, [])]: method;
+						case _: parseClassField();
+					}
+				}
 			case _: throw new hxparse.NoMatch<Dynamic>(curPos(), peek(0));
 		}
 	}
 
+	function parseStaticFields(name:String):ClassField {
+		return switch stream {
+			case [getterSetter = parseSetterGetter(name, true)]: getterSetter; // getterSetter;
+			case [method = parseMethod(name, [AStatic])]: method;
+			case _: throw new hxparse.NoMatch<Dynamic>(curPos(), peek(0));
+		}
+	}
+
+	function parseStaticForeignFields(name:String):ClassField {
+		return switch stream {
+			case [method = parseMethod(name, [AForeign, AStatic])]: method;
+			case _: throw new hxparse.NoMatch<Dynamic>(curPos(), peek(0));
+		}
+	}
+
+	function parseMethod(name:String, access:Array<Access>) {
+		var params = [];
+		var isForeign = false;
+		var pos = null;
+		switch stream {
+			case [{tok: POpen}, _params = parseRepeat(parseParamNames)]:
+				{
+					while (true) {
+						switch stream {
+							case [{tok: PClose, pos: p2}]:
+								params = _params;
+								pos = p2;
+							case [{tok: Line}]: // ignore
+							case _: break;
+						}
+					}
+				}
+			case [{tok: Line}]: // ignore
+		}
+		switch access {
+			case [AForeign]:
+				isForeign = true; // ignore
+			case [AForeign, AStatic]:
+				isForeign = true; // ignore
+			case _:
+				isForeign = false;
+		}
+
+		if (!isForeign) {
+			return switch stream {
+				case [{tok: BrOpen, pos: p2}, body = parseRepeat(parseStatements)]: {
+						switch stream {
+							case [{tok: BrClose}]: return {
+									name: name,
+									doc: null,
+									access: access,
+									kind: FMethod(params, body),
+									pos: p2
+								};
+							case [{tok: Eof}]:
+								errors.push(SError('unclosed block at ${[for (a in access) AccessPrinter.toString(a)].join(" ")} ${name}() \u2190', p2));
+								null;
+							case _: {
+									errors.push(SError('unclosed block at ${[for (a in access) AccessPrinter.toString(a)].join(" ")} ${name}() \u2190', p2));
+									null;
+								}
+						}
+					}
+				case _:
+					errors.push(SError('Error at \'${peek(0)}\' : Expect \'{\' to begin a method body', null));
+					null;
+			}
+		}
+		return {
+			name: name,
+			doc: null,
+			access: access,
+			kind: FMethod(params, []),
+			pos: pos
+		};
+	}
+
+	function parseConstructor() {
+		return switch stream {
+			case [{tok: Const(CIdent(c))}]: {
+					return parseMethod(c, [AConstructor]);
+				}
+		}
+	}
+
 	function parseOpOverloading() {
-		return null;
+		return switch stream {
+			// op { body }
+			case [{tok: Unop(op)}, {tok: BrOpen, pos: p}, code = parseRepeat(parseStatements)]: {
+					switch stream {
+						case [{tok: BrClose}]:
+							{
+								return {
+									name: TokenDefPrinter.toString(Unop(op)),
+									doc: null,
+									access: [],
+									kind: FOperator(FPrefixOp(op, code)),
+									pos: p
+								};
+							}
+						case _:
+							errors.push(SError('Error at ${peek(0)}: unclosed block at operator ${TokenDefPrinter.toString(Unop(op))} \u2190', p));
+							null;
+					}
+				}
+			case [{tok: Binop(op)}]: {
+					return switch stream {
+						// op(other) { body }
+						case [
+							{tok: POpen},
+							{tok: Const(CIdent(other))},
+							{tok: PClose},
+							{tok: BrOpen, pos: p},
+							code = parseRepeat(parseStatements)
+						]: {
+								switch stream {
+									case [{tok: BrClose}]:
+										{
+											return {
+												name: TokenDefPrinter.toString(Binop(op)),
+												doc: null,
+												access: [],
+												kind: FOperator(FInfixOp(op, CIdent(other), code)),
+												pos: p
+											};
+										}
+									case _:
+										errors.push(SError('Error at ${peek(0)}: unclosed block at operator ${TokenDefPrinter.toString(Binop(op))} \u2190',
+											p));
+										null;
+								}
+							}
+						// - {}
+						case [{tok: BrOpen, pos: p}, code = parseRepeat(parseStatements)]: {
+								if (op == OpSub) {
+									return switch stream {
+										case [{tok: BrClose}]:
+											return {
+												name: TokenDefPrinter.toString(Binop(op)),
+												doc: null,
+												access: [],
+												kind: FOperator(FPrefixOp(OpNeg, code)),
+												pos: p
+											};
+
+										case _:
+											errors.push(SError('Error at ${peek(0)}: unclosed block at operator ${TokenDefPrinter.toString(Binop(op))} \u2190',
+												p));
+											null;
+									}
+								} else {
+									throw unexpected();
+								}
+							}
+					}
+				}
+			// [_] or [_]=value
+			case [{tok: BkOpen, pos:p}]: {
+					var subscript_params = [];
+
+					while (true) {
+						switch stream {
+							case [{tok: Const(CIdent(s))}]: subscript_params.push(CIdent(s));
+							case [{tok: Comma}]: continue;
+							case [{tok: BkClose}]: break;
+						}
+					}
+					var rhs = switch stream {
+						case [getterSetter = parseSetterGetter("")]: getterSetter; // getterSetter;
+						case _: unexpected();
+					}
+
+					return {
+						name: "$ArrayGetSet",
+						doc: null,
+						access: [],
+						kind: FOperator(FSubscriptOp(subscript_params, rhs.kind)),
+						pos: p
+					}
+				}
+				// is(other) { body }
+				case [
+					{tok: Kwd(KwdIs)},
+					{tok: POpen},
+					{tok: Const(CIdent(other))},
+					{tok: PClose},
+					{tok: BrOpen, pos: p}
+				]: {
+						var code = parseRepeat(parseStatements);
+						var name = "$is";
+						return switch stream {
+							case [{tok:BrClose}]:{
+								name: name,
+								doc: null,
+								access: [],
+								kind: FOperator(FInfixOp(OpIs, CIdent(other), code)),
+								pos: p
+							}
+							case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\'', p)); return null;
+						}
+
+					}
+		}
 	}
 
-	function parseSetterGetter() {
-		return null;
+	function parseSetterGetter(s:String, _static:Bool = false, _foreign:Bool = false) {
+		var access = [];
+		if (_static)
+			access.push(AStatic);
+		if (_foreign)
+			access.push(AForeign);
+		return switch stream {
+			// setter
+			case [{tok: Binop(OpAssign), pos: p2}]: {
+					return switch stream {
+						case [{tok: POpen}, {tok: Const(CIdent(c))}]: {
+								switch stream {
+									case [{tok: PClose, pos: p2}]: {
+											var body = makeSetter(s, CIdent(c), p2, access);
+											return body;
+										}
+									case _: {
+											errors.push(SError('Error at ${peek(0)}: Expect \')\' at setter', p2));
+											return null;
+										}
+								}
+							}
+						case [{tok: PClose, pos: p2}]: {
+								errors.push(SError('Error at ${peek(0)}: Expect variable name', p2));
+								return null;
+							}
+						case _: {
+								errors.push(SError('Error at ${peek(0)}: Expect variable name', p2));
+								return null;
+							}
+					}
+				}
+			// method (with-args)
+			case [{tok: POpen}, params = parseRepeat(parseParamNames), {tok: PClose, pos: p2}]: {
+					switch stream {
+						case [{tok: BrOpen, pos: p}]: {
+								var data = makeMethod(s, params, p2, access);
+								data;
+							}
+					}
+				}
+			// method (no-args) && Getter
+			case [{tok: BrOpen, pos: p0}]: {
+					var data = null;
+					switch stream {
+						// method (no-args)
+						case [{tok: Line, pos: p}]: {
+								data = makeMethod(s, [], p, access);
+								data;
+							}
+						// Getter
+						case [{tok: Const(c), pos: p}]: {
+								data = {
+									name: s,
+									doc: null,
+									access: access,
+									kind: FGetter(SExpression(null, p)),
+									pos: p
+								}
+								data;
+							}
+						case [{tok: BrClose, pos: p}]: {
+								data = {
+									name: s,
+									doc: null,
+									access: access,
+									kind: FGetter(SExpression(null, p)),
+									pos: p
+								}
+
+								data;
+							}
+					}
+				}
+		}
 	}
 
-	// 	function parseClassField() {
-	// 		return switch stream {
-	// 			case [{tok: Kwd(KwdConstruct)}]: parseMethodWithAccess([AConstructor]);
-	// 			case [{tok: Kwd(KwdStatic)}]: parseMethodWithAccess([AStatic]);
-	// 			case [{tok: Kwd(KwdForeign)}, {tok: Kwd(KwdStatic)}]: parseMethodWithAccess([AForeign, AStatic]);
-	// 			case [{tok: Const(CIdent(s))}]: {
-	// 					switch stream {
-	// 						// setter
-	// 						case [
-	// 							{tok: Binop(op)},
-	// 							{tok: POpen},
-	// 							param = parseParamNames(),
-	// 							{tok: PClose, pos: p2}
-	// 						]: {
-	// 								try {
-	// 									makeSetter(s, param, p2);
-	// 								} catch (e:haxe.Exception) {
-	// 									throw e;
-	// 								}
-	// 							}
-	// 						// method (with-args)
-	// 						case [{tok: POpen}, params = parseRepeat(parseParamNames), {tok: PClose, pos: p2}]: {
-	// 								switch stream {
-	// 									case [{tok: BrOpen}]: {
-	// 											makeMethod(s, params, p2);
-	// 										}
-	// 								}
-	// 							}
-	// 						// method (no-args) && Getter
-	// 						case [{tok: BrOpen}]: {
-	// 								var data = null;
-	// 								switch stream {
-	// 									// method (no-args)
-	// 									case [{tok: Line, pos: p}]: {
-	// 											data = makeMethod(s, [], p);
-	// 										}
-	// 									// Getter
-	// 									case [{tok: Const(c), pos: p}]: {
-	// 											data = makeGetter(s, EStatement([parseExpr({expr: EConst(c), pos: p})]), p);
-	// 											return switch stream {
-	// 												case [{tok: BrClose}]: data;
-	// 												case _: throw 'unclosed block at field $s';
-	// 											}
-	// 										}
-	// 								}
-	// 							}
-	// 					}
-	// 				}
-	// 			case [p = parseOpOverload()]: p;
-	// 			case [{tok: Line}]: parseClassField();
-	// 			case _: null;
-	// 		}
-	// 	}
 	// 	function parseOpOverload() {
 	// 		return switch stream {
 	// 			// op { body }
@@ -432,7 +670,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 	// 								}
 	// 							}
 	// 					}
-	// 					return return {
+	// 					return {
 	// 						name: "",
 	// 						doc: null,
 	// 						access: [],
@@ -442,81 +680,50 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 	// 				}
 	// 		}
 	// 	}
-	// 	function makeMethod(name, args:Array<Constant>, pos) {
-	// 		var code = [];
-	// 		while (true) {
-	// 			code.push(getCodeDef());
-	// 			switch stream {
-	// 				case [{tok: BrClose}]:
-	// 					{
-	// 						break;
-	// 					}
-	// 				case [{tok: CommentLine(s)}]:
-	// 					continue;
-	// 				case [{tok: Eof}]:
-	// 					throw 'unclosed block at method ${name} \u2190';
-	// 			}
-	// 		}
-	// 		return {
-	// 			name: name,
-	// 			doc: null,
-	// 			access: [],
-	// 			kind: FMethod(args, code),
-	// 			pos: pos
-	// 		}
-	// 	}
-	// 	function makeGetter(name, def:CodeDef, pos) {
-	// 		return {
-	// 			name: name,
-	// 			doc: null,
-	// 			access: [],
-	// 			kind: FGetter(def),
-	// 			pos: pos
-	// 		}
-	// 	}
-	// 	function makeSetter(name, arg, pos) {
-	// 		return switch stream {
-	// 			case [{tok: BrOpen}]:
-	// 				{
-	// 					var code = parseRepeat(getCodeDef);
-	// 					switch stream {
-	// 						case [{tok: BrClose}]:
-	// 						case [{tok: Eof}]:
-	// 							throw 'unclosed block at setter ${name} \u2190';
-	// 						case _: {
-	// 								throw 'unclosed block at setter ${name} \u2190';
-	// 							}
-	// 					}
-	// 					return {
-	// 						name: name,
-	// 						doc: null,
-	// 						access: [],
-	// 						kind: FSetter(arg, code),
-	// 						pos: pos
-	// 					};
-	// 				}
-	// 		}
-	// 	}
-	// 	function getCodeDef() {
-	// 		return switch stream {
-	// 			case [{tok: Kwd(KwdImport), pos: p1}]:
-	// 				{
-	// 					parseImport(p1);
-	// 				}
-	// 			case [{tok: Kwd(KwdClass), pos: p}]:
-	// 				{
-	// 					parseClass(p, false);
-	// 				}
-	// 			case [{tok: Kwd(KwdForeign)}, {tok: Kwd(KwdClass), pos: p}]:
-	// 				{
-	// 					parseClass(p, true);
-	// 				}
-	// 			case [{tok: Line}]:
-	// 				parseStatements();
-	// 			case [{tok: CommentLine(s)}]: parseStatements();
-	// 			case [exp = getExpr()]: EStatement([exp]);
-	// 		}
-	// 	}
+	function makeMethod(name, args:Array<Constant>, pos, access:Array<Access>) {
+		var code = parseRepeat(parseStatements);
+		switch stream {
+			case [{tok: BrClose}]:
+				{}
+			case [{tok: Eof}]:
+				errors.push(SError('Error: Expect \'}\', unclosed block at method ${name} \u2190', pos));
+				null;
+		}
+		return {
+			name: name,
+			doc: null,
+			access: access,
+			kind: FMethod(args, code),
+			pos: pos
+		}
+	}
+
+	function makeSetter(name, arg, pos, access:Array<Access>) {
+		return switch stream {
+			case [{tok: BrOpen, pos: p}]:
+				{
+					var code = parseRepeat(parseStatements);
+					switch stream {
+						case [{tok: BrClose}]:
+						case [{tok: Eof}]:
+							errors.push(SError('unclosed block at setter ${name} \u2190', p));
+							return null;
+						case _: {
+								errors.push(SError('unclosed block at setter ${name} \u2190', p));
+								return null;
+							}
+					}
+					return {
+						name: name,
+						doc: null,
+						access: access,
+						kind: FSetter(arg, code),
+						pos: pos
+					};
+				}
+		}
+	}
+
 	function parseParamNames() {
 		return switch stream {
 			case [{tok: Const(CIdent(s)), pos: p}]: {
