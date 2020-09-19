@@ -10,10 +10,10 @@ class Test {
 
 		var p = parser.parse();
 
-		trace(EModule("main", p));
+		trace(p);
 
-		var stest = "%(math.sin())";
-		var stringParse = new StringParser(stest);
-		trace(stringParse.exec());
+		// var stest = "%(math.sin())";
+		// var stringParse = new StringParser(stest);
+		// trace(stringParse.exec());
 	}
 }
