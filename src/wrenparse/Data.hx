@@ -652,7 +652,11 @@ typedef ParamDecl = {
 
 enum StatementDef {
     SImport(path:String, mode:ImportMode, pos:Position);
-    SClass(d:Definition<ClassFlag, Array<ClassField>>, pos:Position);
+	SClass(d:Definition<ClassFlag, Array<ClassField>>, pos:Position);
+	SFor(exp:Expr, code:Array<StatementDef>);
+	SWhile(exp:Expr, code:Array<StatementDef>);
+	SIf(exp:Expr, code:Array<StatementDef>);
+	SBlock(code:Array<StatementDef>);
     SExpression(e:Expr, pos:Position);
     SError(message:String, pos:Position);
     SEnd;

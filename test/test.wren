@@ -27,6 +27,41 @@ class Person {
 }
 
 class Boy is Person {}
+
+while(i < n){
+    break
+}
+for(i in [a, b, c]){
+    break
+}
+
+var a = b = c
+a = d
+if(a >= c){
+    b = [c]
+}
+ b = [c]
+var b = 1...c
+ for(i in 5..7){
+   (a + (c - (d + b)))
+   break
+}
+
+call("hello")
+System.print("hello")
+a.field = ~1 >> 4
+
+if(b && c || a){
+
+}
+
+if(true){
+    if(false){}
+}
+
+if(a is d){}
+
+var x = 1 != 2 ? "math is sane" : "math is not sane!"
 // 	construct new(){
 // 	    if(a){
 // 			a = ~1
@@ -156,3 +191,4 @@ class Boy is Person {}
 
 
 // System.print("%(interpolate)")
+
