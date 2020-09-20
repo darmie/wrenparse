@@ -12,6 +12,12 @@ class Person {
     method(c, b){}
     foreign static item()
 
+    foreign setter=(val)
+
+    foreign get
+
+    foreign method()
+
     +(other) { }
     ! { }
     [index] {}
@@ -20,7 +26,7 @@ class Person {
     is(item){}
 }
 
-// class Boy is Person {
+class Boy is Person {}
 // 	construct new(){
 // 	    if(a){
 // 			a = ~1

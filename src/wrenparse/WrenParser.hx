@@ -173,12 +173,18 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 		return switch stream {
 			case [{tok: Kwd(KwdConstruct)}, construct = parseConstructor()]: construct; // constructor
 			case [{tok: Kwd(KwdStatic)}, {tok: Const(CIdent(s))}, f = parseStaticFields(s)]: f; // static field
-			case [
-				{tok: Kwd(KwdForeign)},
-				{tok: Kwd(KwdStatic)},
-				{tok: Const(CIdent(s))},
-				f = parseStaticForeignFields(s)
-			]: f; // static foreign field
+			case [{tok: Kwd(KwdForeign)},]: // static foreign field
+
+				{
+					switch stream {
+						case [{tok: Kwd(KwdStatic)}, {tok: Const(CIdent(s))}, f = parseForeignFields(s, true)]: {
+								f;
+							}
+						case [{tok: Const(CIdent(s))}, f = parseForeignFields(s, false)]: {
+								f;
+							}
+					}
+				}
 			case [opOverloading = parseOpOverloading()]: opOverloading; // op overloading
 			case [{tok: Line}]: parseClassField();
 			case [{tok: Comment(s)}]: parseClassField();
@@ -202,9 +208,11 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 		}
 	}
 
-	function parseStaticForeignFields(name:String):ClassField {
+	function parseForeignFields(name:String, isStatic:Bool = false):ClassField {
+		var access = isStatic ? [AForeign, AStatic] : [AForeign];
 		return switch stream {
-			case [method = parseMethod(name, [AForeign, AStatic])]: method;
+			case [getterSetter = parseSetterGetter(name, true, true)]: getterSetter; // getterSetter;
+			case [method = parseMethod(name, access)]: method;
 			case _: throw new hxparse.NoMatch<Dynamic>(curPos(), peek(0));
 		}
 	}
@@ -226,7 +234,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 						}
 					}
 				}
-			case [{tok: Line}]: // ignore
+				// case [{tok: Line}]: // ignore
 		}
 		switch access {
 			case [AForeign]:
@@ -351,7 +359,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 					}
 				}
 			// [_] or [_]=value
-			case [{tok: BkOpen, pos:p}]: {
+			case [{tok: BkOpen, pos: p}]: {
 					var subscript_params = [];
 
 					while (true) {
@@ -374,37 +382,39 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 						pos: p
 					}
 				}
-				// is(other) { body }
-				case [
-					{tok: Kwd(KwdIs)},
-					{tok: POpen},
-					{tok: Const(CIdent(other))},
-					{tok: PClose},
-					{tok: BrOpen, pos: p}
-				]: {
-						var code = parseRepeat(parseStatements);
-						var name = "$is";
-						return switch stream {
-							case [{tok:BrClose}]:{
+			// is(other) { body }
+			case [
+				{tok: Kwd(KwdIs)},
+				{tok: POpen},
+				{tok: Const(CIdent(other))},
+				{tok: PClose},
+				{tok: BrOpen, pos: p}
+			]: {
+					var code = parseRepeat(parseStatements);
+					var name = "$is";
+					return switch stream {
+						case [{tok: BrClose}]: {
 								name: name,
 								doc: null,
 								access: [],
 								kind: FOperator(FInfixOp(OpIs, CIdent(other), code)),
 								pos: p
 							}
-							case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\'', p)); return null;
-						}
-
+						case _:
+							errors.push(SError('Error at \'${peek(0)}\': Expect \'}\'', p));
+							return null;
 					}
+				}
 		}
 	}
 
 	function parseSetterGetter(s:String, _static:Bool = false, _foreign:Bool = false) {
 		var access = [];
-		if (_static)
-			access.push(AStatic);
 		if (_foreign)
 			access.push(AForeign);
+		if (_static)
+			access.push(AStatic);
+
 		return switch stream {
 			// setter
 			case [{tok: Binop(OpAssign), pos: p2}]: {
@@ -431,255 +441,88 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							}
 					}
 				}
-			// method (with-args)
-			case [{tok: POpen}, params = parseRepeat(parseParamNames), {tok: PClose, pos: p2}]: {
-					switch stream {
-						case [{tok: BrOpen, pos: p}]: {
-								var data = makeMethod(s, params, p2, access);
-								data;
-							}
-					}
-				}
+			// // method (with-args)
+			// case [{tok: POpen}, params = parseRepeat(parseParamNames), {tok: PClose, pos: p2}]: {
+			// 		switch stream {
+			// 			case [{tok: BrOpen, pos: p}]: {
+			// 					var data = makeMethod(s, params, p2, access);
+			// 					data;
+			// 				}
+			// 		}
+			// 	}
 			// method (no-args) && Getter
 			case [{tok: BrOpen, pos: p0}]: {
-					var data = null;
-					switch stream {
-						// method (no-args)
-						case [{tok: Line, pos: p}]: {
-								data = makeMethod(s, [], p, access);
-								data;
-							}
-						// Getter
-						case [{tok: Const(c), pos: p}]: {
-								data = {
-									name: s,
-									doc: null,
-									access: access,
-									kind: FGetter(SExpression(null, p)),
-									pos: p
+					if (_foreign) {
+						errors.push(SError('Error at \'{\': foreign field \'$s\' cannot have body', p0));
+						null;
+					} else {
+						var data = null;
+						switch stream {
+							// method (no-args)
+							case [{tok: Line, pos: p}]: {
+									data = makeMethod(s, [], p, access);
+									data;
 								}
-								data;
-							}
-						case [{tok: BrClose, pos: p}]: {
-								data = {
-									name: s,
-									doc: null,
-									access: access,
-									kind: FGetter(SExpression(null, p)),
-									pos: p
+							// Getter
+							case [{tok: Const(c), pos: p}]: {
+									data = {
+										name: s,
+										doc: null,
+										access: access,
+										kind: FGetter(SExpression(null, p)),
+										pos: p
+									}
+									data;
 								}
+							case [{tok: BrClose, pos: p}]: {
+									data = {
+										name: s,
+										doc: null,
+										access: access,
+										kind: FGetter(SExpression(null, p)),
+										pos: p
+									}
 
-								data;
-							}
+									data;
+								}
+						}
+					}
+				}
+			case [{tok: Line, pos: p0}]: {
+					if (_foreign) {
+						var data = {
+							name: s,
+							doc: null,
+							access: access,
+							kind: FGetter(null),
+							pos: p0
+						}
+
+						return data;
+					} else {
+						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at getter $s', p0));
+						null;
+					}
+				}
+			case [{tok: Eof, pos: p0}]: {
+					if (_foreign) {
+						var data = {
+							name: s,
+							doc: null,
+							access: access,
+							kind: FGetter(null),
+							pos: p0
+						}
+
+						data;
+					} else {
+						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at getter $s', p0));
+						null;
 					}
 				}
 		}
 	}
 
-	// 	function parseOpOverload() {
-	// 		return switch stream {
-	// 			// op { body }
-	// 			case [{tok: Unop(op)}, {tok: BrOpen, pos: p}]: {
-	// 					var code = [];
-	// 					var name = TokenDefPrinter.toString(Unop(op));
-	// 					while (true) {
-	// 						code.push(getCodeDef());
-	// 						switch stream {
-	// 							case [{tok: BrClose}]:
-	// 								{
-	// 									break;
-	// 								}
-	// 							case [{tok: CommentLine(s)}]:
-	// 								continue;
-	// 							case [{tok: Eof}]:
-	// 								throw 'unclosed block at operator ${name} \u2190';
-	// 						}
-	// 					}
-	// 					return {
-	// 						name: name,
-	// 						doc: null,
-	// 						access: [],
-	// 						kind: FOperator(FPrefixOp(op, code)),
-	// 						pos: p
-	// 					}
-	// 				}
-	// 			case [{tok: Binop(op)}]: {
-	// 					return switch stream {
-	// 						// op(other) { body }
-	// 						case [{tok: POpen}, {tok: Const(CIdent(other))}, {tok: PClose}, {tok: BrOpen, pos: p}]: {
-	// 								var code = [];
-	// 								var name = TokenDefPrinter.toString(Binop(op));
-	// 								while (true) {
-	// 									code.push(getCodeDef());
-	// 									switch stream {
-	// 										case [{tok: BrClose}]:
-	// 											{
-	// 												break;
-	// 											}
-	// 										case [{tok: CommentLine(s)}]:
-	// 											continue;
-	// 										case [{tok: Eof}]:
-	// 											throw 'unclosed block at operator ${name} \u2190';
-	// 									}
-	// 								}
-	// 								return {
-	// 									name: name,
-	// 									doc: null,
-	// 									access: [],
-	// 									kind: FOperator(FInfixOp(op, CIdent(other), code)),
-	// 									pos: p
-	// 								}
-	// 							}
-	// 						case [{tok: BrOpen, pos: p}]: {
-	// 								if (op == OpSub) {
-	// 									var code = [];
-	// 									var name = "-";
-	// 									while (true) {
-	// 										code.push(getCodeDef());
-	// 										switch stream {
-	// 											case [{tok: BrClose}]:
-	// 												{
-	// 													break;
-	// 												}
-	// 											case [{tok: CommentLine(s)}]:
-	// 												continue;
-	// 											case [{tok: Eof}]:
-	// 												throw 'unclosed block at operator ${name} \u2190';
-	// 										}
-	// 									}
-	// 									return {
-	// 										name: name,
-	// 										doc: null,
-	// 										access: [],
-	// 										kind: FOperator(FPrefixOp(OpNeg, code)),
-	// 										pos: p
-	// 									}
-	// 								} else {
-	// 									throw unexpected();
-	// 								}
-	// 							}
-	// 					}
-	// 				}
-	// 			case [
-	// 				{tok: Interpol},
-	// 				{tok: Const(CIdent(other))},
-	// 				{tok: PClose},
-	// 				{tok: BrOpen, pos: p}
-	// 			]: {
-	// 					var code = [];
-	// 					var name = "%";
-	// 					while (true) {
-	// 						code.push(getCodeDef());
-	// 						switch stream {
-	// 							case [{tok: BrClose}]:
-	// 								{
-	// 									break;
-	// 								}
-	// 							case [{tok: CommentLine(s)}]:
-	// 								continue;
-	// 							case [{tok: Eof}]:
-	// 								throw 'unclosed block at operator ${name} \u2190';
-	// 						}
-	// 					}
-	// 					return {
-	// 						name: name,
-	// 						doc: null,
-	// 						access: [],
-	// 						kind: FOperator(FInfixOp(OpMod, CIdent(other), code)),
-	// 						pos: p
-	// 					}
-	// 				}
-	// 			// is(other) { body }
-	// 			case [
-	// 				{tok: Kwd(KwdIs)},
-	// 				{tok: POpen},
-	// 				{tok: Const(CIdent(other))},
-	// 				{tok: PClose},
-	// 				{tok: BrOpen, pos: p}
-	// 			]: {
-	// 					var code = [];
-	// 					var name = "is";
-	// 					while (true) {
-	// 						code.push(getCodeDef());
-	// 						switch stream {
-	// 							case [{tok: BrClose}]:
-	// 								{
-	// 									break;
-	// 								}
-	// 							case [{tok: CommentLine(s)}]:
-	// 								continue;
-	// 							case [{tok: Eof}]:
-	// 								throw 'unclosed block at operator ${name} \u2190';
-	// 						}
-	// 					}
-	// 					return {
-	// 						name: name,
-	// 						doc: null,
-	// 						access: [],
-	// 						kind: FOperator(FInfixOp(OpIs, CIdent(other), code)),
-	// 						pos: p
-	// 					}
-	// 				}
-	// 			// Subscript ops, myclass[value] or  myClass[value] = (other)
-	// 			case [{tok: BkOpen}]: {
-	// 					var subscript_params = [];
-	// 					var code = [];
-	// 					var pos = null;
-	// 					var arg = null;
-	// 					while (true) {
-	// 						switch stream {
-	// 							case [{tok: Const(CIdent(s))}]: subscript_params.push(CIdent(s));
-	// 							case [{tok: Comma}]: continue;
-	// 							case [{tok: BkClose}]: break;
-	// 						}
-	// 					}
-	// 					switch stream {
-	// 						// setter
-	// 						case [{tok: Binop(OpAssign)},{tok: POpen}, {tok: Const(CIdent(other))}, {tok: PClose}, {tok: BrOpen, pos: p}]: {
-	// 								pos = p;
-	// 								arg = CIdent(other);
-	// 								while (true) {
-	// 									code.push(getCodeDef());
-	// 									switch stream {
-	// 										case [{tok: BrClose}]:
-	// 											{
-	// 												break;
-	// 											}
-	// 										case [{tok: CommentLine(s)}]:
-	// 											continue;
-	// 										case [{tok: Eof}]:
-	// 											throw 'unclosed block at operator [${subscript_params.join(",")}]=($other) \u2190';
-	// 									}
-	// 								}
-	// 							}
-	// 						// getter
-	// 						case [{tok: BrOpen, pos: p}]: {
-	// 								pos = p;
-	// 								while (true) {
-	// 									code.push(getCodeDef());
-	// 									switch stream {
-	// 										case [{tok: BrClose}]:
-	// 											{
-	// 												break;
-	// 											}
-	// 										case [{tok: CommentLine(s)}]:
-	// 											continue;
-	// 										case [{tok: Eof}]:
-	// 											throw 'unclosed block at operator [${subscript_params.join(",")}] \u2190';
-	// 									}
-	// 								}
-	// 							}
-	// 					}
-	// 					return {
-	// 						name: "",
-	// 						doc: null,
-	// 						access: [],
-	// 						kind: FOperator(FSubscriptOp(subscript_params, arg, code)),
-	// 						pos: pos
-	// 					}
-	// 				}
-	// 		}
-	// 	}
 	function makeMethod(name, args:Array<Constant>, pos, access:Array<Access>) {
 		var code = parseRepeat(parseStatements);
 		switch stream {
@@ -699,27 +542,68 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 	}
 
 	function makeSetter(name, arg, pos, access:Array<Access>) {
+		var isForeign = switch access {
+			case [AForeign, AStatic]: true;
+			case [AForeign]: true;
+			case _: false;
+		};
+
 		return switch stream {
 			case [{tok: BrOpen, pos: p}]:
 				{
-					var code = parseRepeat(parseStatements);
-					switch stream {
-						case [{tok: BrClose}]:
-						case [{tok: Eof}]:
-							errors.push(SError('unclosed block at setter ${name} \u2190', p));
-							return null;
-						case _: {
+					if (isForeign) {
+						errors.push(SError('Error at \'{\': foreign field cannot have body ', p));
+						return null;
+					} else {
+						var code = parseRepeat(parseStatements);
+						switch stream {
+							case [{tok: BrClose}]:
+							case [{tok: Eof}]:
 								errors.push(SError('unclosed block at setter ${name} \u2190', p));
 								return null;
-							}
+							case _: {
+									errors.push(SError('unclosed block at setter ${name} \u2190', p));
+									return null;
+								}
+						}
+						return {
+							name: name,
+							doc: null,
+							access: access,
+							kind: FSetter(arg, code),
+							pos: pos
+						};
 					}
-					return {
-						name: name,
-						doc: null,
-						access: access,
-						kind: FSetter(arg, code),
-						pos: pos
-					};
+				}
+			case [{tok: Line, pos: p0}]:
+				{
+					if (isForeign) {
+						return {
+							name: name,
+							doc: null,
+							access: access,
+							kind: FSetter(arg, []),
+							pos: pos
+						};
+					} else {
+						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at setter $name', p0));
+						null;
+					}
+				}
+			case [{tok: Eof, pos: p0}]:
+				{
+					if (isForeign)
+						return {
+							name: name,
+							doc: null,
+							access: access,
+							kind: FSetter(arg, []),
+							pos: pos
+						};
+					else {
+						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at setter $name', p0));
+						null;
+					}
 				}
 		}
 	}
