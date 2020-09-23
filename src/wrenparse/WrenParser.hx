@@ -350,6 +350,26 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							}
 					}
 				}
+				// modulo %(v)
+				case [
+					{tok: Interpol},
+					{tok: Const(CIdent(other))},
+					{tok: PClose},
+					{tok: BrOpen, pos: p}
+				]: {
+					var code = parseRepeat(parseStatements);
+					var name = "%";
+					return switch stream {
+						case [{tok:BrClose}]:{
+							name: name,
+							doc: null,
+							access: [],
+							kind: FOperator(FInfixOp(OpMod, CIdent(other), code)),
+							pos: p
+						}
+						case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\'', p)); return null;
+					}
+					}
 			// [_] or [_]=value
 			case [{tok: BkOpen, pos:p}]: {
 					var subscript_params = [];
