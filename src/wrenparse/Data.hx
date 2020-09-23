@@ -655,7 +655,7 @@ enum StatementDef {
 	SClass(d:Definition<ClassFlag, Array<ClassField>>, pos:Position);
 	SFor(exp:Expr, code:Array<StatementDef>);
 	SWhile(exp:Expr, code:Array<StatementDef>);
-	SIf(exp:Expr, code:Array<StatementDef>);
+	SIf(exp:Expr, code:Array<StatementDef>, eelse:Array<StatementDef>);
 	SBlock(code:Array<StatementDef>);
     SExpression(e:Expr, pos:Position);
     SError(message:String, pos:Position);
