@@ -368,26 +368,6 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							}
 					}
 				}
-				// modulo %(v)
-				case [
-					{tok: Interpol},
-					{tok: Const(CIdent(other))},
-					{tok: PClose},
-					{tok: BrOpen, pos: p}
-				]: {
-					var code = parseRepeat(parseStatements);
-					var name = "%";
-					return switch stream {
-						case [{tok:BrClose}]:{
-							name: name,
-							doc: null,
-							access: [],
-							kind: FOperator(FInfixOp(OpMod, CIdent(other), code)),
-							pos: p
-						}
-						case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\'', p)); return null;
-					}
-					}
 			// [_] or [_]=value
 			case [{tok: BkOpen, pos: p}]: {
 					var subscript_params = [];
@@ -442,6 +422,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 				{tok: PClose},
 				{tok: BrOpen, pos: p}
 			]: {
+				trace(other);
 					var code = parseRepeat(parseStatements);
 					var name = "$mod";
 					return switch stream {
@@ -938,7 +919,6 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							case [{tok: POpen, pos: p}]: {
 									var args = [];
 									while(true){
-										trace(peek(0));
 										switch stream {
 											case [{tok: Comma}]: {
 													while (true) {
@@ -953,7 +933,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 											case [{tok: Line}]: continue;
 											case [exp = parseExpression()]: {
 													args.push(exp);
-													trace(args);
+											
 													switch stream {
 														case [{tok: Line, pos: p}]:
 															if((args.length > 0 && args[args.length - 2] != null)){
@@ -988,7 +968,6 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 								}
 							// ArrayGet[x]	
 							case [{tok: BkOpen, pos: p}, exp2 = parseExpression()]: {
-									trace(peek(0));
 									switch stream {
 										case [{tok: BkClose}]: {}
 										case _: errors.push(SError('Error at \'${peek(0)}\': Expect \']\' after expression', p));
