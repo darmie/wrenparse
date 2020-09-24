@@ -7,11 +7,27 @@
 
 -lib hxparse
 
-# --each
+
+--each
+
+
+--cmd echo "macro"
 --interp
 
-# --next
-# --cpp bin/cpp
+--next
+--cpp bin/cpp
+--cmd echo "C++"
+--cmd bin/cpp/Test
 
-# --cmd bin\cpp\Test
+--next
+
+--jvm bin/jvm/Test.jar
+--cmd echo "JVM"
+--cmd java -jar bin/jvm/Test.jar
+
+--next
+
+--java bin/java/Test
+--cmd echo "JAVA"
+--cmd java -jar bin/java/Test/Test.jar
 

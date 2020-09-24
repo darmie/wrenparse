@@ -38,7 +38,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 		super(ts);
 	}
 
-	public function parse():Array<Statement> {
+	public inline function parse():Array<Statement> {
 		var ret = parseRepeat(parseStatements);
 
 		if (errors.length > 0) {
@@ -422,7 +422,6 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 				{tok: PClose},
 				{tok: BrOpen, pos: p}
 			]: {
-				trace(other);
 					var code = parseRepeat(parseStatements);
 					var name = "$mod";
 					return switch stream {
