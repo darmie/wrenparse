@@ -152,11 +152,11 @@ class General {
 			blockStatement
 		}
 
-		// newFn.new{|a, b, c|
-		// 	return
-		// }
+		newFn.new{|a, b, c|
+			// return
+		}
 
-		// newFn.new{a}
+		newFn.new{a}
 
 		System.print((2 * (6 - (2 + 2))))
 
@@ -209,3 +209,9 @@ var arr = [
 
 System.print("%(interpolate)")
 
+var f = Fn.new{|a, b, c|
+  System.print("%(a), %(b), %(c)")
+}
+
+
+f.call().x

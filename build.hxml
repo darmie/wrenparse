@@ -7,27 +7,37 @@
 
 -lib hxparse
 
+--dce  full
+-D no-debug
 
 --each
-
-
---cmd echo "macro"
 --interp
 
 --next
 --cpp bin/cpp
---cmd echo "C++"
---cmd bin/cpp/Test
+
 
 --next
 
 --jvm bin/jvm/Test.jar
---cmd echo "JVM"
---cmd java -jar bin/jvm/Test.jar
+
 
 --next
+-lib hxnodejs
+--js bin/js/Test.js
 
---java bin/java/Test
---cmd echo "JAVA"
---cmd java -jar bin/java/Test/Test.jar
+
+--next
+--cs bin/cs/Test
+
+
+--next 
+--python bin/py/Test.py
+
+--next
+--neko bin/neko/Test.n
+
+
+
+
 
