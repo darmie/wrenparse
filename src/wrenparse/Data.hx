@@ -1,7 +1,5 @@
 package wrenparse;
-
 import haxe.macro.Expr;
-
 
 #if (macro && !doc_gen)
 @:coreType abstract Position {}
@@ -282,7 +280,17 @@ enum ExprDef {
 	/**
 		A block of expressions `{exprs}`.
 	**/
-	EBlock(exprs:Array<Expr>);
+	EBlock(exprs:Array<Expr>, params:Null<Array<Expr>>);
+
+	/**
+		A block argument `b{exprs}`.or 
+		```
+		b{|a, b, c|
+			exprs
+		}
+		```
+	**/
+	EBlockArg(exp:Expr, exprs:Array<Expr>, params:Null<Array<Expr>>);
 
 	/**
 		A `for` expression.
@@ -593,21 +601,20 @@ typedef ClassField = {
 }
 
 enum FieldType {
-	FGetter(value:CodeDef);
-	FSetter(arg:Constant, body:Array<CodeDef>);
-	FMethod(?args:Array<Constant>, body:Array<CodeDef>);
+	FGetter(value:StatementDef);
+	FSetter(arg:Constant, body:Array<StatementDef>);
+	FMethod(?args:Array<Constant>, body:Array<StatementDef>);
 	FOperator(op:FieldOp);
 }
 
 enum FieldOp {
-	FInfixOp(sign:Binop, arg:Constant, body:Array<CodeDef>);
-	FPrefixOp(sign:Unop, body:Array<CodeDef>);
-	FSubscriptOp(params:Array<Constant>, arg:Constant, body:Array<CodeDef>);
+	FInfixOp(sign:Binop, arg:Constant, body:Array<StatementDef>);
+	FPrefixOp(sign:Unop, body:Array<StatementDef>);
+	FSubscriptOp(params:Array<Constant>, rhs:FieldType);
 }
 
 enum Access {
 	AConstructor;
-
 	AStatic;
 	AForeign;
 }
@@ -622,20 +629,19 @@ class AccessPrinter {
 	}
 }
 
-enum CodeDef {
-	EModule(name:String, t:Array<CodeDef>);
-	EClass(d:Definition<ClassFlag, Array<ClassField>>);
-	EImport(pack:String, mode:ImportMode);
-	EStatement(d:Array<Expr>);
-	// EStatic(s:Definition<StaticFlag, FieldType>);
-	Eof;
+enum ClassFlag {
+	HExtends(t:String);
+	HForeign;
 }
 
-enum StatementDef {
-	SFunction(name:String, ?args:Array<haxe.macro.Expr.Constant>, body:Array<Dynamic>);
-	SExpression(e:ExprDef);
-	SIf(exp:Expr, body:Array<StatementDef>);
-	SNull;
+enum ImportMode {
+	INormal;
+	IWithVars(s:Array<String>);
+}
+
+enum StaticFlag {
+	SNormal;
+	SForeign;
 }
 
 typedef Definition<A, B> = {
@@ -653,17 +659,15 @@ typedef ParamDecl = {
 	var name:String;
 }
 
-enum ClassFlag {
-	HExtends(t:String);
-	HForeign;
-}
 
-enum ImportMode {
-	INormal;
-	IWithVars(s:Array<String>);
-}
-
-enum StaticFlag {
-	SNormal;
-	SForeign;
+enum StatementDef {
+    SImport(path:String, mode:ImportMode, pos:Position);
+	SClass(d:Definition<ClassFlag, Array<ClassField>>, pos:Position);
+	SFor(exp:Expr, code:Array<StatementDef>);
+	SWhile(exp:Expr, code:Array<StatementDef>);
+	SIf(exp:Expr, code:Array<StatementDef>, eelse:Array<StatementDef>);
+	SBlock(code:Array<StatementDef>);
+    SExpression(e:Expr, pos:Position);
+    SError(message:String, pos:Position);
+    SEnd;
 }

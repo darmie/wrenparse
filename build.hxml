@@ -7,11 +7,37 @@
 
 -lib hxparse
 
-# --each
+--dce  full
+-D no-debug
+
+--each
 --interp
 
-# --next
-# --cpp bin/cpp
+--next
+--cpp bin/cpp
 
-# --cmd bin\cpp\Test
+
+--next
+
+--jvm bin/jvm/Test.jar
+
+
+--next
+-lib hxnodejs
+--js bin/js/Test.js
+
+
+--next
+--cs bin/cs/Test
+
+
+--next 
+--python bin/py/Test.py
+
+--next
+--neko bin/neko/Test.n
+
+
+
+
 

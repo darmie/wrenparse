@@ -4,25 +4,96 @@ import "desserts" for Tiramisu, IceCream
 // foreign object
 foreign class NativeObject {}
 
-class Person {}
-class Boy is Person {
+
+var arrayGet = g[0]
+
+f.call(10, 
+20,
+30)
+
+class Person {
+    construct new(){}
+    static runner(){}
+    setter=(val){}
+    getter{}
+    method(c, b){}
+    foreign static item()
+
+    foreign setter=(val)
+
+    foreign get
+
+    foreign method()
+
+    +(other) { }
+    ! { }
+    [index] {}
+    [index]=(value) {}
+    [x, y]=(value) {}
+    is(item){}
+}
+
+class Boy is Person {}
+
+while(i < n){
+    break
+}
+for(i in [a, b, c]){
+    break
+}
+
+var a = b = c
+a = d
+if(a >= c){
+    b = [c]
+}
+ b = [c]
+var b = 1...c
+for(i in 5..7){
+   (a + (c - (d + b)))
+   break
+}
+
+call("hello")
+System.print("hello",
+"big")
+a.field = ~1 >> 4
+
+if(b && c || a){
+
+}
+
+if(true){
+    if(false){}
+}
+
+if(a is d){}
+
+var x = 1 != 2 ? "math is sane" : "math is not sane!" // ternary
+var object = {
+    "key": 4,
+    1.2: "hello"
+    // here
+}
+class General {
 	construct new(){
 	    if(a){
-			a = ~1
+			a = ~1 //unary
 		}
-		super.a
+		//super.a
 	}
 	name=(val){"hello"}
 	
 	name{"boy"}
-	foreign static runner{}
+
+	foreign static runner()
 	method(var1, var2){
 		var b = {
 			"k": var1,
 			"hey": var2
 		}
 		var b2 = {}
-		if (n % 2 == 0) n = n / 2 else n = 3 * n + 1
+		if (n % 2 == 0) n = n / 2 else n = 3 * n + 1 // single line if-else
 		var n = 27
 		while (n != 1) {
 			if (n % 2 == 0) {
@@ -34,7 +105,9 @@ class Boy is Person {
 		for (i in 1..100) {
   			System.print(i)
 		}
-		for (i in [1, 2, 3, 4]) {
+		for (i in [11,
+        2, 
+        3, 4]) {
 			System.print(i)           //> 1
   			if (i == 3) break  
 		}
@@ -45,7 +118,7 @@ class Boy is Person {
 			var i = seq_.iteratorValue(iter_)
 			System.print(i)
 		}		
-		if(a & 3 == 1 && b % 5 && c == {"k": 4}){ 
+		if(a && 3 == 1 && b % 5 && c == {"k": 4}){ 
 			1*2
 			0
 			1234
@@ -58,13 +131,13 @@ class Boy is Person {
 			314.159e-02
 		}
 		boy = person
-		var arr = []
+		var arr = [] // empty array
 		var arr2 = [1, 5]
 		call(4, 5, (4+5))
-		arr2[1...-5]
+		arr2[6...-5]
 		arr2[n...k]
 		boy.method(false)
-		boy.girl.person.call(val.tables, arr2[1], null)
+		person.girl.person.call(val.tables, arr2[1], null)
 		val.tables
 		null
 		System.print(false && 1)
@@ -80,7 +153,7 @@ class Boy is Person {
 		}
 
 		newFn.new{|a, b, c|
-			return
+			// return
 		}
 
 		newFn.new{a}
@@ -128,10 +201,17 @@ class Boy is Person {
 	/* Block comment2 *//* Block comment3 */
 */
 var arr = [
-  1,
+    1,
   2,
   3
 ]
 
 
 System.print("%(interpolate)")
+
+var f = Fn.new{|a, b, c|
+  System.print("%(a), %(b), %(c)")
+}
+
+
+f.call().x
