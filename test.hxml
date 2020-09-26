@@ -1,0 +1,16 @@
+
+-cp src
+-cp test
+
+-main Test
+
+
+-lib hxparse
+
+--dce  full
+
+--interp
+
+
+
+
