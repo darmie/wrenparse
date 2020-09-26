@@ -5,11 +5,10 @@
   "tags": ["haxe","cpp", "js", "neko", "macro", "cs", "java", "php", "cross"],
   "description": "A parser for the wren programming language",
   "classPath": "src",
-  "version": "0.0.2",
-  "releasenote": "Initial release. [WIP]",
+  "version": "0.0.3",
+  "releasenote": "[Alpha]",
   "contributors": ["darmie"],
   "dependencies": {
-    "hxcpp": "",
     "hxparse":""
   }
 }
