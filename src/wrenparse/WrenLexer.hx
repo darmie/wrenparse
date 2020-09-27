@@ -32,8 +32,8 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 		};
 	}
 
-	static function mk(lexer:Lexer, td) {
-		return new Token(td, mkPos(lexer.curPos()));
+	static function mk(lexer:Lexer, td, ?line) {
+		return new Token(td, mkPos(lexer.curPos()), line);
 	}
 
 	// @:mapping generates a map with lowercase enum constructor names as keys
@@ -45,6 +45,9 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 	static var ident = "_*[a-zA-Z][a-zA-Z0-9_]*|_+|_+[0-9][_a-zA-Z0-9]*";
 	static var integer = "([1-9][0-9]*)|0";
 
+	public static var lineCount = 0;
+
+
 	// @:rule wraps the expression to the right of => with function(lexer) return
 	public static var tok = @:rule [
 		"" => mk(lexer, Eof),
@@ -54,7 +57,14 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 			token.space = space;
 			token;
 		},
-		"[\n]+" => mk(lexer, Line),
+		"[\n]+" => {
+			var pos = lexer.curPos();
+			var token = mk(lexer, Line);
+			token.pos.min = pos.pmin;
+			token.pos.max = pos.pmax;
+			token.line = lineCount++;
+			token;
+		},
 		"0x[0-9a-fA-F]+" => mk(lexer, Const(CInt(lexer.current))),
 		integer => mk(lexer, Const(CInt(lexer.current))),
 		integer + "\\.[0-9]+" => mk(lexer, Const(CFloat(lexer.current))),
@@ -63,7 +73,9 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 		integer + "\\.[0-9]*[eE][\\+\\-]?[0-9]+" => mk(lexer, Const(CFloat(lexer.current))),
 		// integer + "\\.\\." => mk(lexer, IntInterval(lexer.current.substr(0, -2), false)),
 		// integer + "\\.\\.\\." => mk(lexer, IntInterval(lexer.current.substr(0, -3), true)),
-		"//[^\n\r]*" => mk(lexer, CommentLine(lexer.current.substr(2))),
+		"//[^\n\r]*" =>{
+			mk(lexer, CommentLine(lexer.current.substr(2)));
+		},
 		"~" => mk(lexer, Unop(OpNegBits)),
 		"<<" => mk(lexer, Binop(OpShl)),
 		">>" => mk(lexer, Binop(OpShl)),
@@ -188,6 +200,7 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 		// 	lexer.token(codeString);
 		// },
 		"[\r\n\t ]+" => {
+			lineCount++;
 			buf.add(lexer.current);
 			lexer.token(codeString);
 		}
@@ -199,6 +212,8 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 			lexer.curPos().pmax;
 		},
 		'[^/\\*]+[^]' => {
+			var content = lexer.current.split("\n");
+			for(c in content) lineCount++;
 			buf.add(lexer.current);
 			lexer.token(comment);
 		},

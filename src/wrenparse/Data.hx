@@ -560,10 +560,12 @@ class Token {
 	public var tok:TokenDef;
 	public var pos:Position;
 	public var space = "";
+	public var line:Int;
 
-	public function new(tok, pos) {
+	public function new(tok, pos, ?line) {
 		this.tok = tok;
 		this.pos = pos;
+		this.line = line != null ? line : 0;
 	}
 
 	public function toString() {
@@ -668,6 +670,6 @@ enum StatementDef {
 	SIf(exp:Expr, code:Array<StatementDef>, eelse:Array<StatementDef>);
 	SBlock(code:Array<StatementDef>);
     SExpression(e:Expr, pos:Position);
-    SError(message:String, pos:Position);
+    SError(message:String, pos:Position, line:Int);
     SEnd;
 }

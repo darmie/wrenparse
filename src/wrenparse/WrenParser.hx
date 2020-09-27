@@ -25,6 +25,15 @@ abstract Statement(StatementDef) from StatementDef to StatementDef {
 		// Todo: evaluate and emit bytecode
 		return this;
 	}
+
+	// public inline function toString(){
+	// 	return switch this {
+	// 		case SError(msg, pos, line):{
+	// 			return '[Line: $line] $msg';
+	// 		}
+	// 		case _: "";
+	// 	}
+	// }
 }
 
 class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> implements hxparse.ParserBuilder {
@@ -60,12 +69,18 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 			case [controlFlowStmt = parseConstrolFlow()]: controlFlowStmt;
 			case [{tok: BrOpen, pos: p}, stmt = parseRepeat(parseStatements)]: {
 					switch stream {
-						case [{tok: BrClose}]: SBlock(stmt);
+						case [{tok: BrClose}, {tok:Line}]: SBlock(stmt);
 						case _:
-							errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' ', p));
+							errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' ', p, WrenLexer.lineCount - 1));
 							null;
 					}
 				}
+			case [{tok: Kwd(KwdReturn), pos: p}]:
+			switch stream {
+				case [exp = parseExpression()]: SExpression({expr: EReturn(exp), pos: exp.pos}, exp.pos);
+				case [{tok:Eof}]: errors.push(SError('Error at \'${peek(0)}\': Expected expression.', p, WrenLexer.lineCount - 1));null;
+				case _: SExpression({expr: EReturn(), pos: p}, p);
+			}
 			case [expression = parseExpression()]: SExpression(expression, expression.pos);
 		}
 	}
@@ -79,7 +94,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							pos = {min: pos.min, max: p.max, file: p.file};
 							name;
 						case _:
-							errors.push(SError('Error at ${peek(0)}: Expect a string after \'import\' \u2190', p));
+							errors.push(SError('Error at ${peek(0)}: Expect a string after \'import\' \u2190', p, WrenLexer.lineCount - 1));
 							null;
 					}
 
@@ -98,7 +113,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 
 														case _:
 															errors.push(SError('Error at ${peek(0)}: Expect a constant after \'import "$importName" for ${variables.join(",")}\' \u2190',
-																p));
+																p, WrenLexer.lineCount - 1));
 															isFin = true;
 													}
 												}
@@ -109,7 +124,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 												pos = {min: pos.min, max: p.max, file: p.file};
 												isFin = true;
 											case _:
-												errors.push(SError('Error at ${peek(0)}: Expect a constant after \'import "$importName" for\'', p));
+												errors.push(SError('Error at ${peek(0)}: Expect a constant after \'import "$importName" for\'', p, WrenLexer.lineCount - 1));
 												isFin = true;
 										}
 										if (isFin)
@@ -164,9 +179,9 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 									case [fields = parseClassFields()]: {
 											def.data = def.data.concat(fields);
 											return switch stream {
-												case [{tok: BrClose, pos: p1}]: return SClass(def, {min: p.min, max: p1.max, file: p.file});
+												case [{tok: BrClose, pos: p1}, {tok:Line}]: return SClass(def, {min: p.min, max: p1.max, file: p.file});
 												case _:
-													errors.push(SError('unclosed block at class ${def.name} ${ext != null ? 'is $ext' : ''} { \u2190', p1));
+													errors.push(SError('unclosed block at class ${def.name} ${ext != null ? 'is $ext' : ''} { \u2190', p1, WrenLexer.lineCount - 1));
 													null;
 											}
 										}
@@ -259,7 +274,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 			return switch stream {
 				case [{tok: BrOpen, pos: p2}, body = parseRepeat(parseStatements)]: {
 						switch stream {
-							case [{tok: BrClose}]: return {
+							case [{tok: BrClose}, {tok:Line}]: return {
 									name: name,
 									doc: null,
 									access: access,
@@ -267,16 +282,16 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 									pos: p2
 								};
 							case [{tok: Eof}]:
-								errors.push(SError('unclosed block at ${[for (a in access) AccessPrinter.toString(a)].join(" ")} ${name}() \u2190', p2));
+								errors.push(SError('unclosed block at ${[for (a in access) AccessPrinter.toString(a)].join(" ")} ${name}() \u2190', p2, WrenLexer.lineCount - 1));
 								null;
 							case _: {
-									errors.push(SError('unclosed block at ${[for (a in access) AccessPrinter.toString(a)].join(" ")} ${name}() \u2190', p2));
+									errors.push(SError('unclosed block at ${[for (a in access) AccessPrinter.toString(a)].join(" ")} ${name}() \u2190', p2, WrenLexer.lineCount - 1));
 									null;
 								}
 						}
 					}
 				case _:
-					errors.push(SError('Error at \'${peek(0)}\' : Expect \'{\' to begin a method body', null));
+					errors.push(SError('Error at \'${peek(0)}\' : Expect \'{\' to begin a method body', null, WrenLexer.lineCount - 1));
 					null;
 			}
 		}
@@ -313,7 +328,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 								};
 							}
 						case _:
-							errors.push(SError('Error at ${peek(0)}: unclosed block at operator ${TokenDefPrinter.toString(Unop(op))} \u2190', p));
+							errors.push(SError('Error at ${peek(0)}: unclosed block at operator ${TokenDefPrinter.toString(Unop(op))} \u2190', p, WrenLexer.lineCount - 1));
 							null;
 					}
 				}
@@ -340,7 +355,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 										}
 									case _:
 										errors.push(SError('Error at ${peek(0)}: unclosed block at operator ${TokenDefPrinter.toString(Binop(op))} \u2190',
-											p));
+											p, WrenLexer.lineCount - 1));
 										null;
 								}
 							}
@@ -359,7 +374,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 
 										case _:
 											errors.push(SError('Error at ${peek(0)}: unclosed block at operator ${TokenDefPrinter.toString(Binop(op))} \u2190',
-												p));
+												p, WrenLexer.lineCount - 1));
 											null;
 									}
 								} else {
@@ -411,7 +426,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 								pos: p
 							}
 						case _:
-							errors.push(SError('Error at \'${peek(0)}\': Expect \'}\'', p));
+							errors.push(SError('Error at \'${peek(0)}\': Expect \'}\'', p, WrenLexer.lineCount - 1));
 							return null;
 					}
 				}
@@ -433,7 +448,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 								pos: p
 							}
 						case _:
-							errors.push(SError('Error at \'${peek(0)}\': Expect \'}\'', p));
+							errors.push(SError('Error at \'${peek(0)}\': Expect \'}\'', p, WrenLexer.lineCount - 1));
 							return null;
 					}
 				}
@@ -458,17 +473,17 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 											return body;
 										}
 									case _: {
-											errors.push(SError('Error at ${peek(0)}: Expect \')\' at setter', p2));
+											errors.push(SError('Error at ${peek(0)}: Expect \')\' at setter', p2, WrenLexer.lineCount - 1));
 											return null;
 										}
 								}
 							}
 						case [{tok: PClose, pos: p2}]: {
-								errors.push(SError('Error at ${peek(0)}: Expect variable name', p2));
+								errors.push(SError('Error at ${peek(0)}: Expect variable name', p2, WrenLexer.lineCount - 1));
 								return null;
 							}
 						case _: {
-								errors.push(SError('Error at ${peek(0)}: Expect variable name', p2));
+								errors.push(SError('Error at ${peek(0)}: Expect variable name', p2, WrenLexer.lineCount - 1));
 								return null;
 							}
 					}
@@ -485,7 +500,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 			// method (no-args) && Getter
 			case [{tok: BrOpen, pos: p0}]: {
 					if (_foreign) {
-						errors.push(SError('Error at \'{\': foreign field \'$s\' cannot have body', p0));
+						errors.push(SError('Error at \'{\': foreign field \'$s\' cannot have body', p0, WrenLexer.lineCount - 1));
 						null;
 					} else {
 						var data = null;
@@ -532,7 +547,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 						}
 						return data;
 					} else {
-						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at getter $s', p0));
+						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at getter $s', p0, WrenLexer.lineCount - 1));
 						null;
 					}
 				}
@@ -548,7 +563,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 
 						data;
 					} else {
-						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at getter $s', p0));
+						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at getter $s', p0, WrenLexer.lineCount - 1));
 						null;
 					}
 				}
@@ -561,7 +576,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 			case [{tok: BrClose}]:
 				{}
 			case [{tok: Eof}]:
-				errors.push(SError('Error: Expect \'}\', unclosed block at method ${name} \u2190', pos));
+				errors.push(SError('Error: Expect \'}\', unclosed block at method ${name} \u2190', pos, WrenLexer.lineCount - 1));
 				null;
 		}
 		return {
@@ -584,17 +599,17 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 			case [{tok: BrOpen, pos: p}]:
 				{
 					if (isForeign) {
-						errors.push(SError('Error at \'{\': foreign field cannot have body ', p));
+						errors.push(SError('Error at \'{\': foreign field cannot have body ', p, WrenLexer.lineCount - 1));
 						return null;
 					} else {
 						var code = parseRepeat(parseStatements);
 						switch stream {
 							case [{tok: BrClose}]:
 							case [{tok: Eof}]:
-								errors.push(SError('unclosed block at setter ${name} \u2190', p));
+								errors.push(SError('unclosed block at setter ${name} \u2190', p,WrenLexer.lineCount - 1));
 								return null;
 							case _: {
-									errors.push(SError('unclosed block at setter ${name} \u2190', p));
+									errors.push(SError('unclosed block at setter ${name} \u2190', p, WrenLexer.lineCount - 1));
 									return null;
 								}
 						}
@@ -618,7 +633,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							pos: pos
 						};
 					} else {
-						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at setter $name', p0));
+						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at setter $name', p0, WrenLexer.lineCount - 1));
 						null;
 					}
 				}
@@ -633,7 +648,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							pos: pos
 						};
 					else {
-						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at setter $name', p0));
+						errors.push(SError('Error at \'${peek(0)}\': Expect \'{\' at setter $name', p0, WrenLexer.lineCount - 1));
 						null;
 					}
 				}
@@ -650,7 +665,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 					CIdent(s);
 				}
 			case [{tok: Kwd(k), pos: p}]:
-				errors.push(SError('invalid argument ${KeywordPrinter.toString(k)} at $p', p));
+				errors.push(SError('invalid argument ${KeywordPrinter.toString(k)} at $p', p, WrenLexer.lineCount - 1));
 				null;
 			case [{tok: Comma}]: {
 					switch stream {
@@ -676,7 +691,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 										case [{tok: Comment(s)}]: continue;
 										case [{tok: CommentLine(s)}]: continue;
 										case _:
-											errors.push(SError('Expect \'}\' at ${peek(0)}', p));
+											errors.push(SError('Expect \'}\' at ${peek(0)}', p, WrenLexer.lineCount - 1));
 											break;
 									}
 								}
@@ -694,7 +709,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 																case [{tok: CommentLine(s)}]: continue;
 																case [{tok: Line}]: continue;
 																case _:
-																	errors.push(SError('Expect \'}\' at ${peek(0)}', p));
+																	errors.push(SError('Expect \'}\' at ${peek(0)}', p, WrenLexer.lineCount - 1));
 																	break;
 															}
 														}
@@ -748,7 +763,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							case [{tok: BrClose}]: break;
 							case [{tok: Line}]: continue;
 							case _:
-								errors.push(SError('Expect \'}\' at ${peek(0)}', p));
+								errors.push(SError('Expect \'}\' at ${peek(0)}', p, WrenLexer.lineCount - 1));
 								break;
 						}
 					}
@@ -768,7 +783,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 							case [{tok: BrClose}]: break;
 							case [{tok: Line}]: continue;
 							case _:
-								errors.push(SError('Expect \'}\' at ${peek(0)}', p));
+								errors.push(SError('Expect \'}\' at ${peek(0)}', p, WrenLexer.lineCount - 1));
 								break;
 						}
 					}
@@ -780,6 +795,11 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 	function parseExpression() {
 		return switch stream {
 			case [exp = assignment()]: exp;
+			case [{tok: Kwd(KwdReturn), pos: p}]:
+				switch stream {
+					case [exp = parseExpression()]: {expr: EReturn(exp), pos: exp.pos};
+					case _: {expr: EReturn(), pos: p};
+				}
 				// case [map = parseMap()]: map;
 		}
 	}
@@ -798,11 +818,12 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 			case [{tok: POpen, pos: p}, exp = parseExpression()]: {
 					switch stream {
 						case [{tok: PClose}]: {}
-						case _: errors.push(SError('Expect \')\' after expression', p));
+						case _: errors.push(SError('Expect \')\' after expression', p, WrenLexer.lineCount - 1));
 					}
 
 					{expr: EParenthesis(exp), pos: p};
 				}
+
 			case [list = parseList()]: list;
 			case [map = parseMap()]: map;
 		}
@@ -843,12 +864,12 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 																	case {tok: Comment(s)}: continue;
 																	case {tok: CommentLine(s)}: continue;
 																	case _:
-																		errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' at object declaration.', p));
+																		errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' at object declaration.', p, WrenLexer.lineCount - 1));
 																		break;
 																}
 															}
 														}
-													case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' at object declaration.', p));
+													case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' at object declaration.', p, WrenLexer.lineCount - 1));
 												}
 
 												var hasQuotes = false;
@@ -887,7 +908,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 						switch stream {
 							case [{tok: POpen, pos: p}]: {
 									var args = [];
-									while(true){
+									while (true) {
 										switch stream {
 											case [{tok: Comma}]: {
 													while (true) {
@@ -896,21 +917,20 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 															case _: break;
 														}
 													}
-								
+
 													continue;
 												}
 											case [{tok: Line}]: continue;
 											case [exp = parseExpression()]: {
 													args.push(exp);
-											
+
 													switch stream {
 														case [{tok: Line, pos: p}]:
-															if((args.length > 0 && args[args.length - 2] != null)){
-																while(true){
-																	switch peek(0){
-																		
-																		case {tok:BkClose}: break;
-																		case {tok:Line}: continue;
+															if ((args.length > 0 && args[args.length - 2] != null)) {
+																while (true) {
+																	switch peek(0) {
+																		case {tok: BkClose}: break;
+																		case {tok: Line}: continue;
 																		case _: break;
 																	}
 																}
@@ -924,94 +944,98 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 									expr = {expr: ECall(expr, args), pos: p};
 									switch stream {
 										case [{tok: PClose}]: break;
-										case _: errors.push(SError('Error at \'${peek(0)}\': Expect \')\' after arguments', p));
+										case _: errors.push(SError('Error at \'${peek(0)}\': Expect \')\' after arguments', p, WrenLexer.lineCount - 1));
 									}
-										
 								}
 							case [{tok: Dot, pos: p}]: {
-									// expr = exp;
 									switch stream {
 										case [{tok: Const(CIdent(s)), pos: p}]: expr = {expr: EField(expr, s), pos: p};
 										case _:
-											errors.push(SError('Error at \'${peek(0)}\': Expect property name after \'.\'', p));
+											errors.push(SError('Error at \'${peek(0)}\': Expect property name after \'.\'', p, WrenLexer.lineCount - 1));
 											break;
 									}
-									
 								}
-							// ArrayGet[x]	
+							// ArrayGet[x]
 							case [{tok: BkOpen, pos: p}, exp2 = parseExpression()]: {
 									switch stream {
 										case [{tok: BkClose}]: {}
-										case _: errors.push(SError('Error at \'${peek(0)}\': Expect \']\' after expression', p));
+										case _: errors.push(SError('Error at \'${peek(0)}\': Expect \']\' after expression', p, WrenLexer.lineCount - 1));
 									}
-									expr = {expr: EArray(expr, exp2), pos:p};
-									
-							}
+									expr = {expr: EArray(expr, exp2), pos: p};
+								}
 							// Block arguments s.fn{}
-							case [{tok:BrOpen, pos:p}]:{
-								switch stream {
-									case [{tok:Binop(OpOr)}]:{
-										var params = [];
-										while(true){
-											
-											switch stream {
-												case [{tok:Comment(s)}]: continue;
-												case [{tok:CommentLine(s)}]:continue;
-												case [{tok: Comma}]: {
-													while (true) {
-														switch stream {
-															case [{tok: Line}]: {}
-															case _: break;
-														}
-													}
-								
-													continue;
-												}
-												case [{tok: Line}]: continue;
-												case [expx = parseExpression()]: {
-													params.push(expx);
-													
-													
+							case [{tok: BrOpen, pos: p}]: {
+									switch stream {
+										case [{tok: Binop(OpOr)}]: {
+												var params = [];
+												while (true) {
 													switch stream {
-														case [{tok: Line, pos: p}]:
-															if((params.length > 0 && params[params.length - 2] != null)){
-																while(true){
-																	switch peek(0){
-																		case {tok:Binop(OpOr)}: break;
-																		case {tok:Line}: continue;
-																		case {tok: BrClose}: break;
+														case [{tok: Comment(s)}]: continue;
+														case [{tok: CommentLine(s)}]: continue;
+														case [{tok: Comma}]: {
+																while (true) {
+																	switch stream {
+																		case [{tok: Line}]: {}
 																		case _: break;
-																		
 																	}
 																}
+
+																continue;
 															}
-														case [{tok: Comma}]: {}
+														case [{tok: Line}]: continue;
+														case [expx = parseExpression()]: {
+																params.push(expx);
+
+																switch stream {
+																	case [{tok: Line, pos: p}]:
+																		if ((params.length > 0 && params[params.length - 2] != null)) {
+																			while (true) {
+																				switch peek(0) {
+																					case {tok: Binop(OpOr)}: break;
+																					case {tok: Line}: continue;
+																					case {tok: BrClose}: break;
+																					case _: break;
+																				}
+																			}
+																		}
+																	case [{tok: Comma}]: {}
+																}
+															}
+														case _: break;
 													}
 												}
-												case _: break;
-											}
-										}
-										var exp2 = parseRepeat(parseExpression);
-										switch stream {
-											case [{tok: BrClose}]: {}
-											case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' after expression', p));
-										}
-										
-										
-										expr = {expr: EBlockArg(expr, exp2, params), pos:p};
-									
-									}
-									case [exp2 = parseRepeat(parseExpression)]:{
-										switch stream {
-											case [{tok: BrClose}]: {}
-											case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' after expression', p));
-										}
+												var exp2 = parseRepeat(parseExpression);
+												switch stream {
+													case [{tok: BrClose}]: {
+															switch stream {
+																case [{tok: Comment(s)}]: {}
+																case [{tok: Line}]: {}
+																case [{tok: Eof}]: {}
+																case _: unexpected();
+															}
+														}
+													case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' after expression', p, WrenLexer.lineCount - 1));
+												}
 
-										expr = {expr: EBlockArg(expr,exp2, null), pos:p}
+												expr = {expr: EBlockArg(expr, exp2, params), pos: p};
+											}
+										case [exp2 = parseRepeat(parseExpression)]: {
+												switch stream {
+													case [{tok: BrClose}]: {
+														switch stream {
+															case [{tok: Comment(s)}]: {}
+															case [{tok: Line}]: {}
+															case [{tok: Eof}]: {}
+															case _: unexpected();
+														}
+													}
+													case _: errors.push(SError('Error at \'${peek(0)}\': Expect \'}\' after expression', p, WrenLexer.lineCount - 1));
+												}
+
+												expr = {expr: EBlockArg(expr, exp2, null), pos: p}
+											}
 									}
-									
 								}
-							}
 							case _: break;
 						}
 					}
@@ -1020,8 +1044,6 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 				}
 		}
 	}
-
-
 
 	function variableDecl() {
 		return switch stream {
@@ -1076,11 +1098,12 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 			case [exp = ternary()]: {
 					return switch stream {
 						case [{tok: Binop(OpAssign), pos: p}, value = ternary()]: {
+								
 								return switch exp.expr {
 									case EVars(_): {expr: EBinop(OpAssign, exp, value), pos: value.pos};
 									case EField(_, _): {expr: EBinop(OpAssign, exp, value), pos: value.pos};
 									case _:
-										errors.push(SError('Error at \'${peek(0)}\': Invalid assignment target', p));
+										errors.push(SError('Error at \'${peek(0)}\': Invalid assignment target', p, WrenLexer.lineCount - 1));
 										null;
 								}
 							}
@@ -1101,7 +1124,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 			case [{tok: Unop(OpNegBits), pos: p}, exp = unary()]: {
 					{expr: EUnop(OpNegBits, false, exp), pos: p};
 				}
-			case [{tok:Kwd(KwdReturn)}, exp = unary()]: {expr:EReturn(exp), pos:exp.pos};
+
 			case _: callExpr();
 		}
 	}
@@ -1247,25 +1270,37 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 									args.push(exp);
 									switch stream {
 										case [{tok: Line, pos: p}]:
-											if((args.length > 0 && args[args.length - 2] != null)){
-												while(true){
-													switch peek(0){
-														case {tok:BkClose}: break;
-														case {tok:Line}: continue;
-														case _: errors.push(SError('Error at \'${peek(0)}\': Expect \']\' after expression', p));break;
+											if ((args.length > 0 && args[args.length - 2] != null)) {
+												while (true) {
+													switch peek(0) {
+														case {tok: BkClose}: break;
+														case {tok: Line}: break;
+														case _:
+															errors.push(SError('Error at \'${peek(0)}\': Expect \']\' after expression', p, WrenLexer.lineCount - 1));
+															break;
 													}
 												}
+												
+												
+											} else {
+												switch peek(0) {
+													case {tok: BkClose}: break;
+													case {tok: Line}: break;
+													case _:
+												}
 											}
+										
 										case [{tok: Comma}]: {}
+										case [{tok:BrClose}]:{}
+										case _: continue;
 									}
+									
 								}
-							case _: break;
+							case [{tok: BkClose}]: break;
+							case _: errors.push(SError('Error at \'${peek(0)}\': Expect \']\' after expression', p, WrenLexer.lineCount - 1)); break;
 						}
 					}
-					switch stream {
-						case [{tok: BkClose}]: {};
-						case _: errors.push(SError('Error at \'${peek(0)}\': Expect \']\' after expression', p));
-					}
+					
 					return {expr: EArrayDecl(args), pos: p};
 				}
 		}

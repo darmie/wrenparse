@@ -153,7 +153,7 @@ class General {
 		}
 
 		newFn.new{|a, b, c|
-			// return
+			return
 		}
 
 		newFn.new{a}
@@ -212,6 +212,3 @@ System.print("%(interpolate)")
 var f = Fn.new{|a, b, c|
   System.print("%(a), %(b), %(c)")
 }
-
-
-f.call().x
