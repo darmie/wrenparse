@@ -1,5 +1,6 @@
 package wrenparse;
 
+import wrenparse.objects.ObjModule;
 import haxe.macro.Expr;
 import wrenparse.Data;
 import hxparse.Parser.parse as parse;
@@ -39,6 +40,9 @@ abstract Statement(StatementDef) from StatementDef to StatementDef {
 class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> implements hxparse.ParserBuilder {
 	public var source:String;
 	public var errors:Array<Statement> = [];
+
+	public var vm:VM;
+	public var module:ObjModule;
 
 	public function new(input:byte.ByteData, sourceName:String = "main") {
 		source = sourceName;

@@ -6,9 +6,11 @@
 
 
 -lib hxparse
+-lib polygonal-ds
 
 --dce  full
 -D no-debug
+-D WREN_DEBUG_DUMP_COMPILED_CODE
 
 --each
 --interp

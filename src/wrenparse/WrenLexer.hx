@@ -32,8 +32,8 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 		};
 	}
 
-	static function mk(lexer:Lexer, td, ?line) {
-		return new Token(td, mkPos(lexer.curPos()), line);
+	static function mk(lexer:Lexer, td) {
+		return new Token(td, mkPos(lexer.curPos()), WrenLexer.lineCount);
 	}
 
 	// @:mapping generates a map with lowercase enum constructor names as keys
@@ -58,11 +58,11 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 			token;
 		},
 		"[\n]+" => {
+			lineCount++;
 			var pos = lexer.curPos();
 			var token = mk(lexer, Line);
 			token.pos.min = pos.pmin;
 			token.pos.max = pos.pmax;
-			token.line = lineCount++;
 			token;
 		},
 		"0x[0-9a-fA-F]+" => mk(lexer, Const(CInt(lexer.current))),

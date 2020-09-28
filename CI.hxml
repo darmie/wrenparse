@@ -6,6 +6,7 @@
 
 
 -lib hxparse
+-lib polygonal-ds
 
 --dce  full
 -D no-debug
