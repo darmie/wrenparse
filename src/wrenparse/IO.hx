@@ -62,12 +62,16 @@ typedef StringBuffer = Buffer<ObjString>;
 @:forward(data, count, capacity, fill, write, vm, clear)
 abstract SymbolTable(StringBuffer) from StringBuffer to StringBuffer {
 
+    public inline function new(vm:VM){
+        this =  new StringBuffer(vm);
+    }
 
     public function add(name:String){
-        var symbol:ObjString = new ObjString(); // todo AS_STRING(wrenNewStringLength(vm, name, length));
+        var symbol = ObjString.newString(this.vm, name).AS_STRING();
         this.vm.pushRoot(symbol);
         this.write(symbol);
         this.vm.popRoot();
+        return this.count - 1;
     }
 
     public function find(v:String) {

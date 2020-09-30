@@ -430,6 +430,13 @@ class Compiler {
 	 */
 	public static final MAX_INTERPOLATION_NESTING = 8;
 
+
+	public static final GROW_FACTOR:Int = 2;
+
+	public static final  MAP_LOAD_PERCENT= 75;
+
+	public static final MIN_CAPACITY=16;
+
 	/**
 	 * The compiler for the function enclosing this one, or NULL if it's the
 	 * top level.
@@ -536,7 +543,7 @@ class Compiler {
 			fn.constants.write(constant);
 
 			if (this.constants == null) {
-				this.constants = new ObjMap();
+				this.constants = new ObjMap(this.parser.vm);
 			}
 
 			this.constants.set(constant, Value.NUM_VAL(fn.constants.count - 1));
@@ -593,7 +600,7 @@ class Compiler {
 			compiler.scopeDepth = 0;
 		}
 
-		compiler.fn = new ObjFn(parser.module, compiler.numLocals);
+		compiler.fn = new ObjFn(compiler.parser.vm, parser.module, compiler.numLocals);
 
 		return compiler;
 	}
@@ -781,7 +788,7 @@ class Compiler {
 	 * @param depth
 	 */
 	public function discardLocals(depth:Int) {
-		if (scopeDepth > -1) {
+		if (!(scopeDepth > -1)) {
 			throw "Cannot exit top-level scope.";
 		}
 
@@ -1003,5 +1010,11 @@ class Compiler {
 		this.fn.code.data[offset] =  (jump >> 8) & 0xff;
 		
  		this.fn.code.data[offset + 1] = jump & 0xff;		
+	}
+
+
+
+	public static function compile(module:ObjModule, source:String, isExpression:Bool = false, printErrors:Bool = true):ObjFn {
+		return null;
 	}
 }

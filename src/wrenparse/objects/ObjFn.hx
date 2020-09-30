@@ -41,10 +41,27 @@ class ObjFn extends Obj {
 
     public var debug:FnDebug;
 
-    public function new(module:ObjModule, numLocals:Int) {
-        super();
+    public function new(vm:VM, module:ObjModule, maxSlots:Int) {
+        var debug = new FnDebug(null, new IntBuffer(vm));
+
         this.type = OBJ_FN;
+        super(vm, OBJ_FN, vm.fnClass);
+        this.constants = new ValueBuffer(vm);
+        this.code = new ByteBuffer(vm);
+
+        this.module = module;
+        this.maxSlots = maxSlots;
+        this.numUpvalues = 0;
+        this.arity = 0;
+        this.debug = debug;
     }
+
+    public function bindName(vm:VM, name:String) {
+        this.debug.name = name;
+        this.debug.name += "\\0";
+    }
+
+    
 }
 
 /**
@@ -63,7 +80,7 @@ class FnDebug {
      */
     public var sourceLines:IntBuffer;
 
-    public function new(name:String, sourceLines:IntBuffer) {
+    public function new(name:String = null, sourceLines:IntBuffer = null) {
         this.name= name; 
         this.sourceLines = sourceLines;
     }

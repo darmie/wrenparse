@@ -1,5 +1,8 @@
 package wrenparse.objects;
 
+import wrenparse.Value.ValuePointer;
+import haxe.ds.Vector;
+
 /**
  * The dynamically allocated data structure for a variable that has been used
  * by a closure. Whenever a function accesses a variable declared in an
@@ -19,7 +22,7 @@ class ObjUpvalue extends Obj {
     /**
      * Pointer to the variable this upvalue is referencing.
      */
-    public var value:Pointer<Value>;
+    public var value:ValuePointer;
     /**
      * If the upvalue is closed (i.e. the local variable it was pointing to has
      * been popped off the stack) then the closed-over value will be hoisted out
@@ -27,8 +30,11 @@ class ObjUpvalue extends Obj {
      */
     public var closed:Value;
 
-    public function new() {
-        super();
+    public function new(vm:VM, value:Value) {
         this.type = OBJ_UPVALUE;
+        this.closed = Value.NULL_VAL();
+        this.value = new ValuePointer(Vector.fromArrayCopy([value]));
+        this.next = null;
+        super(vm, OBJ_UPVALUE, null);
     }
 }

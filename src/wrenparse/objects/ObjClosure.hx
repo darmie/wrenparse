@@ -1,6 +1,7 @@
 package wrenparse.objects;
 
 import wrenparse.Utils.FixedArray;
+import wrenparse.VM;
 
 /**
  * An instance of a first-class function and the environment it has closed over.
@@ -15,9 +16,25 @@ class ObjClosure extends ObjFn {
     public var upValues:Array<ObjUpvalue>;
 
     
-    public function new() {
-        super();
+    public function new(vm:VM, module:ObjModule, maxSlots:Int) {
         this.type = OBJ_CLOSURE;
+        super(vm, module, maxSlots);
+    }
+
+    public static function fromFn(vm:VM, fn:ObjFn){
+        var closure:ObjClosure = cast fn;
+
+        // ObjClosure* closure = ALLOCATE_FLEX(vm, ObjClosure,
+        //     ObjUpvalue*, fn->numUpvalues);
+        // initObj(vm, &closure->obj, OBJ_CLOSURE, vm->fnClass);
+
+        // closure->fn = fn;
+
+        // // Clear the upvalue array. We need to do this in case a GC is triggered
+        // // after the closure is created but before the upvalue array is populated.
+        // for (int i = 0; i < fn->numUpvalues; i++) closure->upvalues[i] = NULL;
+
+        return closure;
     }
 }
 
