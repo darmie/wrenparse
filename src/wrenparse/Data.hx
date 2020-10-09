@@ -280,7 +280,17 @@ enum ExprDef {
 	/**
 		A block of expressions `{exprs}`.
 	**/
-	EBlock(exprs:Array<Expr>);
+	EBlock(exprs:Array<Expr>, params:Null<Array<Expr>>);
+
+	/**
+		A block argument `b{exprs}`.or 
+		```
+		b{|a, b, c|
+			exprs
+		}
+		```
+	**/
+	EBlockArg(exp:Expr, exprs:Array<Expr>, params:Null<Array<Expr>>);
 
 	/**
 		A `for` expression.
