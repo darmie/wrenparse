@@ -31,3 +31,9 @@
 --cmd echo "JAVA"
 --cmd java -jar bin/java/Test/Test.jar
 
+--next 
+
+--js bin/js/Test.js
+--cmd echo "Javascript"
+--cmd node bin/js/Test.js
+
