@@ -112,16 +112,46 @@ class ObjFiber extends Obj {
 	}
 
 	public function hasError():Bool {
-		return false;
+		return !fiber.error.IS_NULL();
 	}
 
-	public function callFunction(vm:VM, closure:ObjClosure, numArgs){}
+	public function callFunction(vm:VM, closure:ObjClosure, numArgs:Int) {}
 
-	public function closeUpvalues(value:ValuePointer){
+	public function closeUpvalues(value:ValuePointer) {}
 
-	}
-
-	public function captureUpvalues(vm:VM, upvalues:ValuePointer):ObjUpvalue{
+	public function captureUpvalues(vm:VM, upvalues:ValuePointer):ObjUpvalue {
 		return null;
+	}
+
+	public function callForeign(vm:VM, foreign:VM.WrenForeignMethodFn, numArgs:Int) {
+		Utils.ASSERT(vm.apiStack == null, "Cannot already be in foreign call.");
+		vm.apiStack = fiber.stackTop.pointer(-numArgs);
+		foreign(vm);
+		// Discard the stack slots for the arguments and temporaries but leave one
+		// for the result.
+		fiber.stackTop = vm.apiStack.pointer(1);
+
+		vm.apiStack = null;
+	}
+
+	public function createForeign(vm:VM, stack:ValuePointer) {
+		var classObj = stack.value().AS_CLASS();
+		Utils.ASSERT(classObj.numFields == -1, "Class must be a foreign class.");
+		// TODO: Don't look up every time.
+		var symbol = vm.methodNames.find("<allocate>");
+		Utils.ASSERT(symbol != -1, "Should have defined <allocate> symbol.");
+
+		Utils.ASSERT(classObj.methods.count > symbol, "Class should have allocator.");
+		var method = classObj.methods.data[symbol];
+
+		Utils.ASSERT(method.type == METHOD_FOREIGN, "Allocator should be foreign.");
+
+		// Pass the constructor arguments to the allocator as well.
+		ASSERT(vm.apiStack == null, "Cannot already be in foreign call.");
+		vm.apiStack = stack;
+
+		method.as.foreign(vm);
+
+		vm.apiStack = null;
 	}
 }

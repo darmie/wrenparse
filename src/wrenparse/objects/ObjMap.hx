@@ -184,4 +184,17 @@ class ObjMap extends Obj {
 				vm.popRoot();
 		}
 	}
+
+	public static function validateKey(vm:VM, arg:Value) {
+		if (arg.IS_BOOL() || arg.IS_CLASS() || arg.IS_NULL() || arg.IS_NUM() || arg.IS_RANGE() || arg.IS_STRING()) {
+			return true;
+		}
+
+		// RETURN_ERROR("Key must be a value type.");
+		do {
+			vm.fiber.error = ObjString.newString(vm, "Key must be a value type.");
+			return false;
+		} while (false);
+		return false;
+	}
 }

@@ -3,6 +3,7 @@ package wrenparse.objects;
 import wrenparse.IO.SymbolTable;
 import wrenparse.Value.ValueBuffer;
 import wrenparse.VM;
+import wrenparse.Compiler;
 
 /**
  * A loaded module and the top-level variables it defines.
@@ -72,5 +73,29 @@ class ObjModule extends Obj {
 		return symbol;
 	}
 
-	public function getModuleVariable(vm:VM, value:Value):Value{return Value.NULL_VAL()}
+	public function getModuleVariable(vm:VM, value:Value):Value {
+		var variable = variableName.AS_STRING();
+		var variableEntry = module.variableNames.find(variable.value.join(""));
+		// It's a runtime error if the imported variable does not exist.
+		if (variableEntry != -1) {
+			return module.variables.data[variableEntry];
+		}
+		fiber.error = ObjString.format(vm, "Could not find a variable named '@' in module '@'.", [variableName, module.name.OBJ_VAL()]);
+		return Value.NULL_VAL();
+	}
+
+	public function findVariable(vm:VM, name:String):Value {
+		var symbol = module.variableNames.find(name);
+		return module.variables.data[symbol];
+	}
+
+	public function declareVariable(vm:VM, name:String, line:Int) {
+		if (module.variables.count == Compiler.MAX_MODULE_VARS)
+			return -2;
+		// Implicitly defined variables get a "value" that is the line where the
+		// variable is first used. We'll use that later to report an error on the
+		// right line.
+		module.variables.write(name, Value.NUM_VAL(line));
+		return module.variableNames.add(name);
+	}
 }

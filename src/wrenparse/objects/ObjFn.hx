@@ -3,6 +3,7 @@ package wrenparse.objects;
 import wrenparse.IO.IntBuffer;
 import wrenparse.Value.ValueBuffer;
 import wrenparse.IO.ByteBuffer;
+import wrenparse.VM;
 
 /**
  * A function object. It wraps and owns the bytecode and other debug information
@@ -60,8 +61,6 @@ class ObjFn extends Obj {
         this.debug.name = name;
         this.debug.name += "\\0";
     }
-
-    
 }
 
 /**
@@ -84,4 +83,5 @@ class FnDebug {
         this.name= name; 
         this.sourceLines = sourceLines;
     }
+
 }

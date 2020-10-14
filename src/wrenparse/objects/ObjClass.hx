@@ -111,14 +111,14 @@ class ObjClass extends Obj {
 		metaclass.bindSuperclass(vm, vm.classClass);
 		var classObj = new ObjClass(vm, numFields, name);
 		// Make sure the class isn't collected while the inherited methods are being
-        // bound.
-        vm.pushRoot(classObj);
-        classObj.classObj = metaclass;
-        classObj.bindSuperclass(vm, superclass);
-        vm.popRoot();
-        vm.popRoot();
+		// bound.
+		vm.pushRoot(classObj);
+		classObj.classObj = metaclass;
+		classObj.bindSuperclass(vm, superclass);
+		vm.popRoot();
+		vm.popRoot();
 
-        return classObj;
+		return classObj;
 	}
 
 	public function bindMethod(vm:VM, symbol:Int, method:Method) {
@@ -130,13 +130,45 @@ class ObjClass extends Obj {
 		}
 
 		this.methods.data[symbol] = method;
-    }
-
-
-    public function newInstance() {
-        
 	}
-	
-	public function methodNotFound(vm:VM, symbold:Int){}
-    
+
+	public function bindMethodCode(fn:ObjFn){}
+
+	public function bindForeignClass(vm:VM, module:ObjModule) {
+		var methods:VM.WrenForeignClassMethods = {};
+		// Check the optional built-in module first so the host can override it.
+		if (vm.config.bindForeignClassFn != null) {
+			methods = vm.config.bindForeignClassFn(vm, module.name.value.join(""), classObj.name.value.join(""));
+		}
+
+		// If the host didn't provide it, see if it's a built in optional module.
+		if (methods.allocate == null && methods.finalize == null) {}
+		var method = new Method(METHOD_FOREIGN);
+		// Add the symbol even if there is no allocator so we can ensure that the
+		// symbol itself is always in the symbol table.
+		var symbol = method.methodNames.ensure("<allocate>");
+		if (methods.allocate != null) {
+			method.as.foreign = methods.allocate;
+			bindMethod(vm, symbol, method);
+		}
+		// Add the symbol even if there is no finalizer so we can ensure that the
+		// symbol itself is always in the symbol table.
+		symbol = method.methodNames.ensure("<finalize>");
+		if (methods.finalize != null) {
+			method.as.foreign = methods.finalize;
+			bindMethod(vm, symbol, method);
+		}
+	}
+
+	public function newInstance() {}
+
+	/**
+	 * Aborts the current fiber with an appropriate method not found error for a
+	 * method with [symbol] on [classObj].
+	 * @param vm
+	 * @param symbold
+	 */
+	public function methodNotFound(vm:VM, symbold:Int) {
+		vm.fiber.error = ObjString.format(vm, "@ does not implement '$'.", [classObj.name.OBJ_VAL(), vm.methodNames.data[symbol].value]);
+	}
 }

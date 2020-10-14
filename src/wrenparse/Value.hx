@@ -78,7 +78,7 @@ class ValuePointer {
  * it places it in `args[0]` and returns `true`. If it causes a runtime error
  * or modifies the running fiber, it returns `false`.
  */
-typedef Primitive = (vm:Dynamic, args:ValuePointer) -> Bool;
+typedef Primitive = (vm:VM, args:ValuePointer) -> Bool;
 
 typedef ValueAs = {
 	?num:Float,
@@ -101,6 +101,12 @@ class Value {
 
 	public inline function AS_STRING():ObjString {
 		return cast this.as.obj;
+	}
+
+	public inline function AS_CSTRING():String {
+		var v = cast(this.as.obj, ObjString).value;
+		if(v == null) return null;
+		return v.join("");
 	}
 
 	public inline function AS_NUM():Float {
@@ -135,7 +141,25 @@ class Value {
 		return obj;
 	}
 
+	public inline function IS_FOREIGN() {
+		return this.type == VAL_OBJ && this.AS_OBJ().type == OBJ_FOREIGN;
+	}
+
+	public inline function AS_FOREIGN() {
+		var obj:ObjForeign = cast this.AS_OBJ();
+		return obj;
+	}
+
 	public inline function AS_FUN():ObjFn {
+		return cast this.as.obj;
+	}
+
+
+	public inline function AS_LIST():ObjList {
+		return cast this.as.obj;
+	}
+
+	public inline function AS_MAP():ObjMap {
 		return cast this.as.obj;
 	}
 
@@ -161,9 +185,22 @@ class Value {
 		return this.type == VAL_NULL;
 	}
 
+	public inline function IS_LIST() {
+		return IS_OBJ() && AS_OBJ().type == OBJ_LIST;
+	}
+
+	public inline function IS_MAP() {
+		return IS_OBJ() && AS_OBJ().type == OBJ_MAP;
+	}
+
 	public static inline function NUM_VAL(i:Int) {
 		final v = new Value(VAL_NUM);
 		v.as.num = i;
+		return v;
+	}
+
+	public static inline function BOOL_VAL(v:Bool) {
+		final v = new Value(v ? VAL_TRUE : VAL_FALSE);
 		return v;
 	}
 

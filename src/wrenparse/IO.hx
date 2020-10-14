@@ -83,6 +83,14 @@ abstract SymbolTable(StringBuffer) from StringBuffer to StringBuffer {
         }
         return -1;
     }
+
+    public function ensure(name:String):Int {
+        // See if the symbol is already defined.
+        var existing = find(name);
+        if (existing != -1) return existing;
+        // New symbol, so add it.
+        return add(name);
+    }
 }
 
 
