@@ -1,7 +1,9 @@
 package wrenparse.objects;
 
+import polygonal.ds.ArrayList;
 import wrenparse.Value.ValuePointer;
 import haxe.ds.Vector;
+import wrenparse.Compiler.MAX_UPVALUES;
 
 /**
  * The dynamically allocated data structure for a variable that has been used
@@ -33,7 +35,7 @@ class ObjUpvalue extends Obj {
     public function new(vm:VM, value:Value) {
         this.type = OBJ_UPVALUE;
         this.closed = Value.NULL_VAL();
-        this.value = new ValuePointer(Vector.fromArrayCopy([value]));
+        this.value = new ValuePointer(new ArrayList(MAX_UPVALUES));
         this.next = null;
         super(vm, OBJ_UPVALUE, null);
     }

@@ -44,6 +44,10 @@ class Utils {
 		#end
 	}
 
+	public static function UNREACHABLE() {
+		throw "This code should not be reached";
+	}
+
 	// Returns `true` if [name] is a local variable name (starts with a lowercase
 	// letter).
 	public static inline function isLocalName(name:String) {

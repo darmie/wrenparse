@@ -1,5 +1,6 @@
 package wrenparse.objects;
 
+import wrenparse.Value.ValuePointer;
 import wrenparse.Utils.FixedArray;
 import wrenparse.VM;
 
@@ -56,7 +57,7 @@ class CallFrame {
      * the receiver, followed by the function's parameters, then local variables
      * and temporaries.
      */
-    public var stackStart:Pointer<Value>;
+    public var stackStart:ValuePointer;
 
     public function new() {}
 }

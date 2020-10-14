@@ -71,4 +71,6 @@ class ObjModule extends Obj {
 
 		return symbol;
 	}
+
+	public function getModuleVariable(vm:VM, value:Value):Value{return Value.NULL_VAL()}
 }

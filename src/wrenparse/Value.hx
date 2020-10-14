@@ -1,9 +1,12 @@
 package wrenparse;
 
+import wrenparse.objects.ObjClass;
+import wrenparse.objects.ObjInstance;
 import haxe.ds.Vector;
 import haxe.Int64;
 import wrenparse.objects.ObjRange;
 import wrenparse.objects.ObjString;
+import wrenparse.objects.ObjFn;
 import wrenparse.objects.Obj;
 import wrenparse.IO.Buffer;
 import polygonal.ds.ArrayList;
@@ -44,12 +47,14 @@ class ValuePointer {
 		++index;
 	}
 
-	public inline function dec(): Void {
+	public inline function dec(): Value {
 		--index;
+		return value();
 	}
 
-	public inline function drop(): Void {
+	public inline function drop(): Value {
 		index--;
+		return value();
 	}
 
 	public inline function pointer(index: Int): ValuePointer {
@@ -73,7 +78,7 @@ class ValuePointer {
  * it places it in `args[0]` and returns `true`. If it causes a runtime error
  * or modifies the running fiber, it returns `false`.
  */
-typedef Primitive = (vm:Dynamic, args:Array<Value>) -> Bool;
+typedef Primitive = (vm:Dynamic, args:ValuePointer) -> Bool;
 
 typedef ValueAs = {
 	?num:Float,
@@ -105,6 +110,36 @@ class Value {
 	public inline function IS_OBJ() {
 		return this.type == VAL_OBJ;
 	}
+
+	public inline function IS_INSTANCE() {
+		return this.type == VAL_OBJ && this.AS_OBJ().type == OBJ_INSTANCE;
+	}
+
+	public inline function IS_CLOSURE() {
+		return this.type == VAL_OBJ && this.AS_OBJ().type == OBJ_CLOSURE;
+	}
+
+	public inline function AS_CLOSURE() {
+		var obj:ObjClosure = cast this.AS_OBJ();
+		return obj;
+	}
+
+
+	public inline function AS_INSTANCE() {
+		var obj:ObjInstance = cast this.AS_OBJ();
+		return obj;
+	}
+
+	public inline function AS_CLASS() {
+		var obj:ObjClass = cast this.AS_OBJ();
+		return obj;
+	}
+
+	public inline function AS_FUN():ObjFn {
+		return cast this.as.obj;
+	}
+
+
 
 	public inline function IS_FALSE() {
 		return this.type == VAL_FALSE;

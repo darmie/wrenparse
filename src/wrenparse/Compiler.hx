@@ -524,14 +524,14 @@ class Compiler {
 	 * @param constant
 	 * @return Int
 	 */
-	public function addConstant(constant:Value):Int {
+	public function addConstant(vm:VM, constant:Value):Int {
 		if (this.parser.errors.length >= 1) {
 			return -1;
 		}
 
 		// See if we already have a constant for the value. If so, reuse it.
 		if (this.constants != null) {
-			var exisiting:Value = constants.get(constant);
+			var exisiting:Value = constants.get(vm, constant);
 			if (exisiting.IS_NUM())
 				return FPHelper.floatToI32(exisiting.as.num);
 		}
@@ -546,7 +546,7 @@ class Compiler {
 				this.constants = new ObjMap(this.parser.vm);
 			}
 
-			this.constants.set(constant, Value.NUM_VAL(fn.constants.count - 1));
+			this.constants.set(vm, constant, Value.NUM_VAL(fn.constants.count - 1));
 		} else {
 			error('A function may only contain ${MAX_CONSTANTS} unique constants.');
 		}
@@ -678,8 +678,8 @@ class Compiler {
 	 * it from the constant table.
 	 * @param value
 	 */
-	public function emitConstant(value:Value) {
-		final constant = addConstant(value);
+	public function emitConstant(vm:VM, value:Value) {
+		final constant = addConstant(vm, value);
 		// Compile the code to load the constant.
 		emitShortArg(CODE_CONSTANT, constant);
 	}
@@ -715,7 +715,7 @@ class Compiler {
 		// Top-level module scope.
 		if (this.scopeDepth == -1) {
 			var line = -1;
-			var symbol = this.parser.vm.defineVariable(this.parser.module, token.pos.min, length, Value.NULL_VAL(), line);
+			var symbol = this.parser.vm.defineVariable(this.parser.module, token.toString(), Value.NULL_VAL(), line);
 
 			if (symbol == -1) {
 				error("Module variable is already defined.");
@@ -956,7 +956,7 @@ class Compiler {
 		emitByteArg(CODE_LOAD_LOCAL, slot);
 	}
 
-	public function endCompiler(debugName:String) {
+	public function endCompiler(vm:VM, debugName:String) {
 		if (this.parser.errors.length >= 1) {
 			this.parser.vm.compiler = this.parent;
 			return null;
@@ -970,7 +970,7 @@ class Compiler {
 
 		// In the function that contains this one, load the resulting function object.
 		if (this.parent != null) {
-			var constant = this.parent.addConstant(this.fn.OBJ_VAL());
+			var constant = this.parent.addConstant(vm, this.fn.OBJ_VAL());
 
 			// Wrap the function in a closure. We do this even if it has no upvalues so
 			// that the VM can uniformly assume all called objects are closures. This

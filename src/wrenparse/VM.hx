@@ -1,5 +1,6 @@
 package wrenparse;
 
+import wrenparse.objects.ObjClass.Method;
 import wrenparse.Value.ValuePointer;
 import wrenparse.Value.ValueBuffer;
 import wrenparse.IO.Buffer;
@@ -301,20 +302,41 @@ class VM {
 		fiber.stackTop.setValue(0, apiStack.value(numSlots));
 	}
 
-	public function getSlotCount(){
-		if(apiStack == null) return 0;
+	public function getSlotCount() {
+		if (apiStack == null)
+			return 0;
 
 		return fiber.stackTop.sub(apiStack);
 	}
 
-	public function ensureStack(fiber:ObjFiber, needed:Int){
-		if (fiber.stackCapacity >= needed) return;
+	public function ensureStack(fiber:ObjFiber, needed:Int) {
+		if (fiber.stackCapacity >= needed)
+			return;
 
 		var capacity = Utils.wrenPowerOf2Ceil(needed);
 		var oldStack = fiber.stack;
 		fiber.stack = new ValuePointer(new ArrayList(capacity, fiber.stack.arr.toArray()));
 		fiber.stackCapacity = capacity;
+	}
 
+	public function checkArity(args:ValuePointer, numArgs:Int):Bool {
+		return false;
+	}
+
+	public function runtimeError() {}
+
+	public function callForeign(fiber:ObjFiber, foreign:ObjForeign, numArgs:Int) {}
+
+	public function createForeign(fiber:ObjFiber, vals:ValuePointer) {}
+
+	public function createClass(numFields:Int, module:ObjModule){}
+
+	public function functionBindName(fn:ObjFn, name:String) {}
+
+	public function bindMethod(methodType:Int, symbol:Int, module:ObjModule, classObj:ObjClass, methodValue:Value){}
+
+	public function importModule(value:Value):Value {
+		return null;
 	}
 
 	public function runInterpreter(fiber:ObjFiber):WrenInterpretResult {
@@ -325,34 +347,33 @@ class VM {
 
 		var frame:ObjClosure.CallFrame = null;
 
-		var stackStart:Pointer<Value> = null;
+		var stackStart:ValuePointer = null;
 		var ip:Pointer<Int> = null;
 		var fn:ObjFn = null;
 
 		function PUSH(value:Value) {
+			fiber.stackTop.inc();
 			fiber.stackTop.setValue(0, value);
 		}
 		function POP() {
-			fiber.stackTop.dec();
-			return fiber.stackTop.pointer(0);
+			return fiber.stackTop.dec();
 		}
 		function DROP() {
-			fiber.stackTop.drop();
+			return fiber.stackTop.drop();
 		}
 		function PEEK() {
-			return fiber.stackTop.pointer(-1);
+			return fiber.stackTop.value(-1);
 		}
 		function PEEK2() {
-			return fiber.stackTop.pointer(-2);
+			return fiber.stackTop.value(-2);
 		}
 		function READ_BYTE() {
-			ip.inc();
-			return ip.pointer(0);
+			return ip.value(1);
 		}
 
 		function READ_SHORT() {
 			ip.inc();
-			ip.inc();
+			ip.setValue(0, 2);
 			return (ip.value(-2) << 8) | ip.value(-1);
 		}
 		// Use this before a CallFrame is pushed to store the local variables back
@@ -370,6 +391,455 @@ class VM {
 			} while (false);
 		}
 
-		return null;
+		LOAD_FRAME();
+
+		var instruction:Code;
+		while (true) {
+			function completeCall(numArgs:Int, symbol:Int, args:ValuePointer, classObj:ObjClass) {
+				var method:Method = null;
+				// If the class's method table doesn't include the symbol, bail.
+				if (symbol >= classObj.methods.count || (method = classObj.methods.data[symbol]).type == METHOD_NONE) {
+					classObj.methodNotFound(this, symbol);
+					// RUNTIME_ERROR
+					do {
+						STORE_FRAME();
+						runtimeError();
+						if (fiber == null)
+							return WREN_RESULT_RUNTIME_ERROR;
+						fiber = this.fiber;
+						LOAD_FRAME();
+					} while (false);
+				}
+
+				return switch method.type {
+					case METHOD_PRIMITIVE:
+						{
+							if (method.as.primitive(this, args)) {
+								// The result is now in the first arg slot. Discard the other
+								// stack slots.
+								// fiber->stackTop -= numArgs - 1;
+								fiber.stackTop = fiber.stackTop.pointer(-(numArgs - 1));
+							} else {
+								// An error, fiber switch, or call frame change occurred.
+								STORE_FRAME();
+
+								// If we don't have a fiber to switch to, stop interpreting.
+								fiber = this.fiber;
+								if (fiber == null)
+									return WREN_RESULT_SUCCESS;
+								if (fiber.hasError())
+									// RUNTIME_ERROR
+									do {
+										STORE_FRAME();
+										runtimeError();
+										if (fiber == null)
+											return WREN_RESULT_RUNTIME_ERROR;
+										fiber = this.fiber;
+										LOAD_FRAME();
+									} while (false);
+								LOAD_FRAME();
+							}
+							return null;
+						}
+					case METHOD_FUNCTION_CALL:
+						{
+							if (!this.checkArity(args, numArgs)) {
+								// RUNTIME_ERROR
+								do {
+									STORE_FRAME();
+									runtimeError();
+									if (fiber == null)
+										return WREN_RESULT_RUNTIME_ERROR;
+									fiber = this.fiber;
+									LOAD_FRAME();
+								} while (false);
+							}
+							STORE_FRAME();
+							method.as.primitive(this, args);
+							LOAD_FRAME();
+							return null;
+						}
+					case METHOD_FOREIGN: {
+							callForeign(fiber, method.as.foreign, numArgs);
+							if (fiber.hasError())
+								// RUNTIME_ERROR
+								do {
+									STORE_FRAME();
+									runtimeError();
+									if (fiber == null)
+										return WREN_RESULT_RUNTIME_ERROR;
+									fiber = this.fiber;
+									LOAD_FRAME();
+								} while (false);
+							return null;
+						}
+					case METHOD_BLOCK: {
+							STORE_FRAME();
+							fiber.callFunction(this, method.as.closure, numArgs);
+							LOAD_FRAME();
+							return null;
+						}
+					case METHOD_NONE: {
+							Utils.UNREACHABLE();
+							return null;
+						}
+				}
+			}
+
+			switch (instruction = READ_BYTE()) {
+				case CODE_LOAD_LOCAL_0 | CODE_LOAD_LOCAL_1 | CODE_LOAD_LOCAL_3 | CODE_LOAD_LOCAL_4 | CODE_LOAD_LOCAL_5 | CODE_LOAD_LOCAL_6 |
+					CODE_LOAD_LOCAL_7 | CODE_LOAD_LOCAL_8:
+					{
+						PUSH(stackStart.value(instruction - CODE_LOAD_LOCAL_0));
+						continue;
+					}
+				case CODE_LOAD_LOCAL:
+					{
+						PUSH(stackStart.value(READ_BYTE()));
+						continue;
+					}
+				case CODE_LOAD_FIELD_THIS:
+					{
+						var field = READ_BYTE();
+						var receiver = stackStart.value(0);
+						Utils.ASSERT(receiver.IS_INSTANCE(), "Receiver should be instance.");
+						var instance = receiver.AS_INSTANCE();
+						Utils.ASSERT(field < instance.classObj.numFields, "Out of bounds field.");
+						PUSH(instance.fields[field]);
+						continue;
+					}
+				case CODE_POP:
+					{
+						DROP();
+						continue;
+					}
+				case CODE_CALL_0 | CODE_CALL_1 | CODE_CALL_2 | CODE_CALL_3 | CODE_CALL_4 | CODE_CALL_5 | CODE_CALL_6 | CODE_CALL_7 | CODE_CALL_8 |
+					CODE_CALL_9 | CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 | CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16:
+					{
+						// Add one for the implicit receiver argument.
+						var numArgs = instruction - CODE_CALL_0 + 1
+							; // numArgs
+						var symbol = READ_SHORT(); // symbol
+						// The receiver is the first argument.
+						var args = fiber.stackTop.pointer(-numArgs);
+						var classObj = getClassInline(args.value(0));
+						var res = completeCall(numArgs, symbol, args, classObj);
+						if (res == null) {
+							continue;
+						} else {
+							return res;
+						}
+					}
+				case CODE_SUPER_0 | CODE_SUPER_1 | CODE_SUPER_2 | CODE_SUPER_3 | CODE_SUPER_4 | CODE_SUPER_5 | CODE_SUPER_6 | CODE_SUPER_7 | CODE_SUPER_8 |
+					CODE_SUPER_9 | CODE_SUPER_10 | CODE_SUPER_11 | CODE_SUPER_12 | CODE_SUPER_13 | CODE_SUPER_14 | CODE_SUPER_15 | CODE_SUPER_16:
+					{
+						// Add one for the implicit receiver argument.
+						var numArgs = instruction - CODE_SUPER_0 + 1
+							; // numArgs
+						var symbol = READ_SHORT(); // symbol
+						// The receiver is the first argument.
+						var args = fiber.stackTop.pointer(-numArgs);
+						// The superclass is stored in a constant.
+						var classObj = fn.constants.data[READ_SHORT()].AS_CLASS();
+						var res = completeCall(numArgs, symbol, args, classObj);
+						if (res == null) {
+							continue;
+						} else {
+							return res;
+						}
+					}
+				case CODE_LOAD_UPVALUE:
+					{
+						var upvalues = frame.closure.upValues;
+						PUSH(upvalues[READ_BYTE()].value.value());
+						continue;
+					}
+				case CODE_STORE_UPVALUE:
+					{
+						var upvalues = frame.closure.upValues;
+						upvalues[READ_BYTE()].value.setValue(0, PEEK());
+						continue;
+					}
+				case CODE_LOAD_MODULE_VAR:
+					{
+						PUSH(fn.module.variables.data[READ_SHORT()]);
+						continue;
+					}
+				case CODE_STORE_MODULE_VAR:
+					{
+						fn.module.variables.data[READ_SHORT()] = PEEK();
+						continue;
+					}
+				case CODE_STORE_FIELD_THIS:
+					{
+						var field = READ_BYTE();
+						var receiver = stackStart.value();
+						Utils.ASSERT(receiver.IS_INSTANCE(), "Receiver should be instance.");
+						var instance = receiver.AS_INSTANCE();
+						Utils.ASSERT(field < instance.classObj.numFields, "Out of bounds field.");
+						instance.fields[field] = PEEK();
+						continue;
+					}
+				case CODE_LOAD_FIELD:
+					{
+						var field = READ_BYTE();
+						var receiver = POP();
+						Utils.ASSERT(receiver.IS_INSTANCE(), "Receiver should be instance.");
+						var instance = receiver.AS_INSTANCE();
+						Utils.ASSERT(field < instance.classObj.numFields, "Out of bounds field.");
+						PUSH(instance.fields[field]);
+						continue;
+					}
+				case CODE_STORE_FIELD:
+					{
+						var field = READ_BYTE();
+						var receiver = POP();
+						Utils.ASSERT(receiver.IS_INSTANCE(), "Receiver should be instance.");
+						var instance = receiver.AS_INSTANCE();
+						Utils.ASSERT(field < instance.classObj.numFields, "Out of bounds field.");
+						instance.fields[field] = PEEK();
+						continue;
+					}
+				case CODE_JUMP:
+					{
+						var offset = READ_SHORT();
+						ip.inc();
+						ip.setValue(0, offset);
+						continue;
+					}
+				case CODE_LOOP:
+					{
+						// Jump back to the top of the loop.
+						var offset = READ_SHORT();
+						ip.setValue(-1, offset);
+						continue;
+					}
+				case CODE_JUMP_IF:
+					{
+						var offset = READ_SHORT();
+						var condition = POP();
+						if (condition.IS_FALSE() || condition.IS_NULL())
+							ip.inc();
+						ip.setValue(0, offset);
+						continue;
+					}
+				case CODE_AND:
+					{
+						var offset = READ_SHORT();
+						var condition = PEEK();
+						if (condition.IS_FALSE() || condition.IS_NULL()) {
+							// Short-circuit the right hand side.
+							ip.inc();
+							ip.setValue(0, offset);
+						} else {
+							// Discard the condition and evaluate the right hand side.
+							DROP();
+						}
+
+						continue;
+					}
+				case CODE_OR:
+					{
+						var offset = READ_SHORT();
+						var condition = PEEK();
+						if (condition.IS_FALSE() || condition.IS_NULL()) {
+							// Discard the condition and evaluate the right hand side.
+							DROP();
+						} else {
+							// Short-circuit the right hand side.
+							ip.inc();
+							ip.setValue(0, offset);
+						}
+						continue;
+					}
+				case CODE_CLOSE_UPVALUE:
+					{
+						// Close the upvalue for the local if we have one.
+						fiber.closeUpvalues(fiber.stackTop.pointer(-1));
+						DROP();
+						continue;
+					}
+				case CODE_RETURN:
+					{
+						var result = POP();
+						fiber.numFrames--;
+						// Close any upvalues still in scope.
+						fiber.closeUpvalues(fiber.stackStart);
+						// If the fiber is complete, end it.
+						if (fiber.numFrames == 0) {
+							// See if there's another fiber to return to. If not, we're done.
+							if (fiber.caller == null) {
+								// Store the final result value at the beginning of the stack so the
+								// Haxe API can get it.
+								fiber.stack.setValue(0, result);
+								fiber.stackTop = fiber.stack.pointer(1);
+								return WREN_RESULT_SUCCESS;
+							}
+
+							var resumingFiber = fiber.caller;
+							fiber.caller = null;
+							fiber = resumingFiber;
+							this.fiber = resumingFiber;
+
+							// Store the result in the resuming fiber.
+							fiber.stackTop.setValue(-1, result);
+						} else {
+							// Store the result of the block in the first slot, which is where the
+							// caller expects it.
+							stackStart.setValue(0, result);
+
+							// Discard the stack slots for the call frame (leaving one slot for the
+							// result).
+							fiber.stackTop = frame.stackStart.pointer(1);
+						}
+						LOAD_FRAME();
+						continue;
+					}
+				case CODE_CONSTRUCT:
+					{
+						Utils.ASSERT(stackStart.value().IS_CLASS(), "'this' should be a class.");
+						stackStart.setValue(0, stackStart.value().AS_CLASS().newInstance());
+						continue;
+					}
+				case CODE_FOREIGN_CONSTRUCT:
+					{
+						Utils.ASSERT(stackStart.value().IS_CLASS(), "'this' should be a class.");
+						createForeign(fiber, stackStart);
+					}
+				case CODE_CLOSURE:
+					{
+						// Create the closure and push it on the stack before creating upvalues
+						// so that it doesn't get collected.
+						var func = fn.constants.data[READ_SHORT()].AS_FUN();
+						var closure = new ObjClosure(vm, func);
+						PUSH(closure.OBJ_VAL());
+						// Capture upvalues, if any.
+						for(i in 0...func.numUpvalues){
+							var isLocal = READ_BYTE();
+							var index = READ_BYTE();
+							if(isLocal != null){
+								// Make an new upvalue to close over the parent's local variable.
+								closure.upValues[i] = fiber.captureUpvalue(this, frame.stackStart.pointer(index));
+							} else {
+								// Use the same upvalue as the current call frame.
+								closure.upValues[i] = frame.closure.upValues[index];
+							}
+						}
+						continue;
+					}
+				case CODE_CLASS:{
+					createClass(READ_BYTE(), null);
+					if(fiber.hasError()) {
+						// RUNTIME_ERROR
+						do {
+							STORE_FRAME();
+							runtimeError();
+							if (fiber == null)
+								return WREN_RESULT_RUNTIME_ERROR;
+							fiber = this.fiber;
+							LOAD_FRAME();
+						} while (false);
+					}
+					continue;
+				}
+				case CODE_FOREIGN_CLASS:{
+					createClass(-1, fn.module);
+					if(fiber.hasError()) {
+						// RUNTIME_ERROR
+						do {
+							STORE_FRAME();
+							runtimeError();
+							if (fiber == null)
+								return WREN_RESULT_RUNTIME_ERROR;
+							fiber = this.fiber;
+							LOAD_FRAME();
+						} while (false);
+					}
+					continue;
+				}
+				case CODE_METHOD_INSTANCE | CODE_METHOD_STATIC:{
+					var symbol = READ_SHORT();
+					var classObj = PEEK().AS_CLASS();
+					var method = PEEK2();
+					bindMethod(instruction, symbol, fn.module, classObj, method);
+					if(fiber.hasError()) {
+						// RUNTIME_ERROR
+						do {
+							STORE_FRAME();
+							runtimeError();
+							if (fiber == null)
+								return WREN_RESULT_RUNTIME_ERROR;
+							fiber = this.fiber;
+							LOAD_FRAME();
+						} while (false);
+					}
+					DROP();
+      				DROP();
+					continue;
+				}
+				case CODE_END_MODULE:{
+					lastModule = fn.module;
+					PUSH(Value.NULL_VAL());
+					continue;
+				}
+				case CODE_IMPORT_MODULE:{
+					// Make a slot on the stack for the module's fiber to place the return
+					// value. It will be popped after this fiber is resumed. Store the
+					// imported module's closure in the slot in case a GC happens when
+					// invoking the closure.	
+					PUSH(importModule(fn.constants.data[READ_SHORT()]));
+					if(fiber.hasError()) {
+						// RUNTIME_ERROR
+						do {
+							STORE_FRAME();
+							runtimeError();
+							if (fiber == null)
+								return WREN_RESULT_RUNTIME_ERROR;
+							fiber = this.fiber;
+							LOAD_FRAME();
+						} while (false);
+					}
+					// If we get a closure, call it to execute the module body.
+					if(PEEK().IS_CLOSURE()){
+						STORE_FRAME();
+						var closure = PEEK().AS_CLOSURE();
+						fiber.callFunction(closure, 1);
+						LOAD_FRAME();
+					} else {
+						// The module has already been loaded. Remember it so we can import
+						// variables from it if needed.
+						lastModule = PEEK().AS_MODULE();
+					}
+					continue;
+				}
+				case CODE_IMPORT_VARIABLE: {
+					var variable = fn.constants.data[READ_SHORT()];
+					Utils.ASSERT(lastModule != null, "Should have already imported module.");
+					var result = lastModule.getModuleVariable(this, variable);
+					if(fiber.hasError()) {
+						// RUNTIME_ERROR
+						do {
+							STORE_FRAME();
+							runtimeError();
+							if (fiber == null)
+								return WREN_RESULT_RUNTIME_ERROR;
+							fiber = this.fiber;
+							LOAD_FRAME();
+						} while (false);
+					}
+					PUSH(result);
+				}
+				case CODE_END:{
+					// A CODE_END should always be preceded by a CODE_RETURN. If we get here,
+					// the compiler generated wrong code.
+					Utils.UNREACHABLE();
+				}
+			}
+		}
+
+		// We should only exit this function from an explicit return from CODE_RETURN
+		// or a runtime error.
+		Utils.UNREACHABLE();
+		return WREN_RESULT_RUNTIME_ERROR;
 	}
 }

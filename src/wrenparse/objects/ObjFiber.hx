@@ -1,5 +1,6 @@
 package wrenparse.objects;
 
+import wrenparse.Value;
 import wrenparse.Value.ValuePointer;
 import wrenparse.objects.ObjClosure.CallFrame;
 import wrenparse.VM.INITIAL_CALL_FRAMES;
@@ -79,7 +80,7 @@ class ObjFiber extends Obj {
 		// Add one slot for the unused implicit receiver slot that the compiler
 		// assumes all functions have.
 		var stackCapacity = closure == null ? 1 : Utils.wrenPowerOf2Ceil(closure.maxSlots + 1);
-		var stack:ValuePointer = new ValuePointer(new haxe.ds.Vector(stackCapacity));
+		var stack:ValuePointer = new ValuePointer(new polygonal.ds.ArrayList(stackCapacity));
 
 		// ObjFiber* fiber = ALLOCATE(vm, ObjFiber);
 		// initObj(vm, &fiber->obj, OBJ_FIBER, vm->fiberClass);
@@ -108,5 +109,19 @@ class ObjFiber extends Obj {
 		}
 
 		super(vm, OBJ_FIBER, null);
+	}
+
+	public function hasError():Bool {
+		return false;
+	}
+
+	public function callFunction(vm:VM, closure:ObjClosure, numArgs){}
+
+	public function closeUpvalues(value:ValuePointer){
+
+	}
+
+	public function captureUpvalues(vm:VM, upvalues:ValuePointer):ObjUpvalue{
+		return null;
 	}
 }

@@ -135,6 +135,8 @@ class ObjClass extends Obj {
 
     public function newInstance() {
         
-    }
+	}
+	
+	public function methodNotFound(vm:VM, symbold:Int){}
     
 }
