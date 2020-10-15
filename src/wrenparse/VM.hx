@@ -308,7 +308,7 @@ class VM {
 			}
 		}
 
-		var fn = Compiler.compile(module, source, isExpression, printErrors);
+		var fn = Compiler.compile(this, module, source, isExpression, printErrors);
 		if (fn == null) {
 			// TODO: Should we still store the module even if it didn't compile?
 			return null;

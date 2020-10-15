@@ -9,6 +9,7 @@ import wrenparse.Utils.FixedArray;
 import wrenparse.IO.IntBuffer;
 import wrenparse.IO.SymbolTable;
 import wrenparse.Data.StatementDef;
+using StringTools;
 
 typedef Local = {
 	// The name of the local variable. This points directly into the original
@@ -84,19 +85,19 @@ typedef Signature = {
  */
 typedef ClassInfo = {
 	// The name of the class.
-	name:ObjString,
+	?name:ObjString,
 	// Symbol table for the fields of the class.
-	fields:SymbolTable,
+	?fields:SymbolTable,
 	// Symbols for the methods defined by the class. Used to detect duplicate
 	// method definitions.
-	methods:IntBuffer,
-	staticMethods:IntBuffer,
+	?methods:IntBuffer,
+	?staticMethods:IntBuffer,
 	// True if the class being compiled is a foreign class.
-	isForeign:Bool,
+	?isForeign:Bool,
 	// True if the current method being compiled is static.
-	inStatic:Bool,
+	?inStatic:Bool,
 	// The signature of the method being compiled.
-	signature:Signature
+	?signature:Signature
 }
 
 /**
@@ -678,8 +679,8 @@ class Compiler {
 	 * it from the constant table.
 	 * @param value
 	 */
-	public function emitConstant(vm:VM, value:Value) {
-		final constant = addConstant(vm, value);
+	public function emitConstant(value:Value) {
+		final constant = addConstant(this.parser.vm, value);
 		// Compile the code to load the constant.
 		emitShortArg(CODE_CONSTANT, constant);
 	}
@@ -1012,10 +1013,30 @@ class Compiler {
  		this.fn.code.data[offset + 1] = jump & 0xff;		
 	}
 
+	public function loadCoreVariable(name:String){}
 
 
-	public static function compile(module:ObjModule, source:String, isExpression:Bool = false, printErrors:Bool = true):ObjFn {
-		return null;
+
+	public static function compile(vm:VM, module:ObjModule, source:String, isExpression:Bool = false, printErrors:Bool = true):ObjFn {
+	
+		// Skip the UTF-8 BOM if there is one.
+		// "\xEF\xBB\xBF"
+		if(source.charCodeAt(0) == 239 && source.charCodeAt(1) == 187 && source.charCodeAt(2) == 191){
+			source = source.substring(3);
+		}
+
+		var parser = new WrenParser(byte.ByteData.ofString(source), module.name.value.join(""));
+		parser.vm = vm;
+		parser.module = module;
+		parser.source = source;
+
+		var compiler = init(parser, null, false);
+		// start parsing 
+		parser.parse();
+
+		compiler.emitOp(CODE_RETURN);
+
+		return compiler.endCompiler(vm, "(script)");
 	}
 
 
