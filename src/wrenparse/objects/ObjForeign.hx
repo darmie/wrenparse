@@ -2,7 +2,6 @@ package wrenparse.objects;
 
 import wrenparse.VM;
 import wrenparse.Utils;
-import wrenparse.objects.ObjClass.MethodType;
 
 class ObjForeign extends Obj {
 	public var data:Dynamic;
@@ -22,14 +21,14 @@ class ObjForeign extends Obj {
 			return;
 
 		// If the class doesn't have a finalizer, bail out.
-		var classObj:ObjClass = foreign.classObj;
+		var classObj:ObjClass = classObj;
 		if (symbol >= classObj.methods.count)
             return;
         
         var method = classObj.methods.data[symbol];
         if (method.type == METHOD_NONE) return;
         Utils.ASSERT(method.type == METHOD_FOREIGN, "Finalizer should be foreign.");
-        var finalizer:VM.WrenFinalizerFn = cast method.as.foreign;
-        finalizer(foreign.data);
+        var finalizer:WrenFinalizerFn = cast method.as.foreign;
+        finalizer(data);
 	}
 }

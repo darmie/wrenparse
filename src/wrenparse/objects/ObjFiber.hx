@@ -1,5 +1,6 @@
 package wrenparse.objects;
 
+import polygonal.ds.ArrayList;
 import wrenparse.Value;
 import wrenparse.Value.ValuePointer;
 import wrenparse.objects.ObjClosure.CallFrame;
@@ -112,24 +113,128 @@ class ObjFiber extends Obj {
 	}
 
 	public function hasError():Bool {
-		return !fiber.error.IS_NULL();
+		return !error.IS_NULL();
 	}
 
-	public function callFunction(vm:VM, closure:ObjClosure, numArgs:Int) {}
+	public function callFunction(vm:VM, closure:ObjClosure, numArgs:Int) {
+		// Grow the call frame array if needed.
+		if (numFrames + 1 > frameCapacity) {
+			var max = frameCapacity * 2;
+			frames = new Vector(frameCapacity); // (CallFrame*)wrenReallocate(vm, fiber->frames, sizeof(CallFrame) * fiber->frameCapacity, sizeof(CallFrame) * max);
+			frameCapacity = max;
+		}
+		// Grow the stack if needed.
+		var stackSize = (stackTop.sub(stack));
+		var needed = stackSize + closure.maxSlots;
+		ensureStack(vm, needed);
+		appendCallFrame(vm, closure, stackTop.pointer(-numArgs));
+	}
 
-	public function closeUpvalues(value:ValuePointer) {}
+	public function ensureStack(vm:VM, needed:Int) {
+		if (stackCapacity >= needed)
+			return;
 
-	public function captureUpvalues(vm:VM, upvalues:ValuePointer):ObjUpvalue {
-		return null;
+		var capacity = Utils.wrenPowerOf2Ceil(needed);
+		var oldStack = stack;
+		stack = new ValuePointer(new ArrayList(capacity, stack.arr.toArray()));
+		stackCapacity = capacity;
+
+		// If the reallocation moves the stack, then we need to recalculate every
+		// pointer that points into the old stack to into the same relative distance
+		// in the new stack. We have to be a little careful about how these are
+		// calculated because pointer subtraction is only well-defined within a
+		// single array, hence the slightly redundant-looking arithmetic below.
+
+		if (stack != oldStack) {
+			// Top of the stack.
+			if (vm.apiStack.gte(oldStack) && vm.apiStack.lte(this.stackTop)) {
+				vm.apiStack = this.stack.pointer(vm.apiStack.sub(oldStack));
+			}
+			// Stack pointer for each call frame.
+			for (i in 0...this.numFrames) {
+				var frame:CallFrame = this.frames[i];
+				frame.stackStart = this.stack.pointer(frame.stackStart.sub(oldStack));
+			}
+			var upvalue = openUpvalues.value();
+			while (upvalue != null) {
+				upvalue.value = this.stack.pointer(upvalue.value.sub(oldStack));
+				upvalue = cast upvalue.next;
+			}
+			this.stackTop = this.stack.pointer(this.stackTop.sub(oldStack));
+		}
+	}
+
+	public function appendCallFrame(vm:VM, closure:ObjClosure, stackStart:ValuePointer) {
+		// The caller should have ensured we already have enough capacity.
+		Utils.ASSERT(frameCapacity > numFrames, "No memory for call frame.");
+		var frame = frames[numFrames++];
+		frame.stackStart = stackStart;
+		frame.closure = closure;
+		frame.ip = new Pointer(closure.code.data);
+	}
+
+	public function closeUpvalues(last:ValuePointer) {
+		while (openUpvalues != null && openUpvalues.value().value.gte(last)) {
+			var upvalue = openUpvalues.value();
+
+			// Move the value into the upvalue itself and point the upvalue to it.
+			upvalue.closed = upvalue.value.value();
+			upvalue.value.setValue(0, upvalue.closed);
+
+			// Remove it from the open upvalue list.
+			openUpvalues.setValue(0, cast upvalue.next);
+		}
+	}
+
+	/**
+	 * Captures the local variable [local] into an [Upvalue]. If that local is
+	 * already in an upvalue, the existing one will be used. (This is important to
+	 * ensure that multiple closures closing over the same variable actually see
+	 * the same variable.) Otherwise, it will create a new open upvalue and add it
+	 * the fiber's list of upvalues.
+	 * @param vm
+	 * @param upvalues
+	 * @return ObjUpvalue
+	 */
+	public function captureUpvalues(vm:VM, local:ValuePointer):ObjUpvalue {
+		// If there are no open upvalues at all, we must need a new one.
+		if (openUpvalues == null) {
+			openUpvalues.setValue(0, new ObjUpvalue(vm, local.value()));
+			return openUpvalues.value();
+		}
+		var prevUpvalue:Pointer<ObjUpvalue> = null;
+		var upvalue = openUpvalues;
+
+		// Walk towards the bottom of the stack until we find a previously existing
+		// upvalue or pass where it should be.
+		while (upvalue != null && upvalue.value().value.gt(local)) {
+			prevUpvalue = upvalue;
+			upvalue.setValue(0, cast upvalue.value().next);
+		}
+		// Found an existing upvalue for this local.
+		if (upvalue != null && upvalue.value().value == local)
+			return upvalue.value();
+		// We've walked past this local on the stack, so there must not be an
+		// upvalue for it already. Make a new one and link it in in the right
+		// place to keep the list sorted.
+		var createdUpvalue = new ObjUpvalue(vm, local.value());
+		if (prevUpvalue == null) {
+			// The new one is the first one in the list.
+			openUpvalues.setValue(0, createdUpvalue);
+		} else {
+			prevUpvalue.value().next = createdUpvalue;
+		}
+		createdUpvalue.next = upvalue.value();
+		return createdUpvalue;
 	}
 
 	public function callForeign(vm:VM, foreign:VM.WrenForeignMethodFn, numArgs:Int) {
 		Utils.ASSERT(vm.apiStack == null, "Cannot already be in foreign call.");
-		vm.apiStack = fiber.stackTop.pointer(-numArgs);
+		vm.apiStack = stackTop.pointer(-numArgs);
 		foreign(vm);
 		// Discard the stack slots for the arguments and temporaries but leave one
 		// for the result.
-		fiber.stackTop = vm.apiStack.pointer(1);
+		stackTop = vm.apiStack.pointer(1);
 
 		vm.apiStack = null;
 	}
@@ -147,7 +252,7 @@ class ObjFiber extends Obj {
 		Utils.ASSERT(method.type == METHOD_FOREIGN, "Allocator should be foreign.");
 
 		// Pass the constructor arguments to the allocator as well.
-		ASSERT(vm.apiStack == null, "Cannot already be in foreign call.");
+		Utils.ASSERT(vm.apiStack == null, "Cannot already be in foreign call.");
 		vm.apiStack = stack;
 
 		method.as.foreign(vm);

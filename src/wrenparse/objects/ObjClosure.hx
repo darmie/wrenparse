@@ -19,6 +19,7 @@ class ObjClosure extends ObjFn {
     
     public function new(vm:VM, module:ObjModule, maxSlots:Int) {
         this.type = OBJ_CLOSURE;
+        this.upValues = [];
         super(vm, module, maxSlots);
     }
 

@@ -42,4 +42,12 @@ class Pointer<T> {
 	public inline function lt(pointer: Pointer<T>): Bool {
 		return index < pointer.index;
 	}
+
+	public inline function gte(pointer: Pointer<T>): Bool {
+		return index >= pointer.index;
+	}
+
+	public inline function lte(pointer: Pointer<T>): Bool {
+		return index <= pointer.index;
+	}
 }

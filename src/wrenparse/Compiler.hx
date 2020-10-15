@@ -715,7 +715,7 @@ class Compiler {
 		// Top-level module scope.
 		if (this.scopeDepth == -1) {
 			var line = -1;
-			var symbol = this.parser.vm.defineVariable(this.parser.module, token.toString(), Value.NULL_VAL(), line);
+			var symbol = this.parser.module.defineVariable(this.parser.vm, token.toString(), token.toString().length, Value.NULL_VAL(), line);
 
 			if (symbol == -1) {
 				error("Module variable is already defined.");
@@ -966,7 +966,7 @@ class Compiler {
 		// we can't rely on CODE_RETURN to tell us we're at the end.
 		emitOp(CODE_END);
 
-		this.parser.vm.functionBindName(this.fn, debugName);
+		this.fn.bindName(this.parser.vm, debugName);
 
 		// In the function that contains this one, load the resulting function object.
 		if (this.parent != null) {
@@ -1016,5 +1016,39 @@ class Compiler {
 
 	public static function compile(module:ObjModule, source:String, isExpression:Bool = false, printErrors:Bool = true):ObjFn {
 		return null;
+	}
+
+
+	/**
+	 * Returns the number of arguments to the instruction at [ip] in [fn]'s
+	 * bytecode.
+	 * @param bytecode
+	 * @param constants
+	 * @param ip
+	 * @return Int
+	 */
+	 public static function getByteCountForArguments(bytecode:Array<Int>, constants:Array<Value>, ip:Int):Int {
+		var instruction:Code = bytecode[ip];
+		return switch instruction {
+			case CODE_NULL | CODE_FALSE | CODE_TRUE | CODE_POP | CODE_CLOSE_UPVALUE | CODE_RETURN | CODE_END | CODE_LOAD_LOCAL_0 | CODE_LOAD_LOCAL_1 |
+				CODE_LOAD_LOCAL_2 | CODE_LOAD_LOCAL_3 | CODE_LOAD_LOCAL_4 | CODE_LOAD_LOCAL_5 | CODE_LOAD_LOCAL_6 | CODE_LOAD_LOCAL_7 | CODE_LOAD_LOCAL_8 |
+				CODE_CONSTRUCT | CODE_FOREIGN_CONSTRUCT | CODE_FOREIGN_CLASS | CODE_END_MODULE:
+				0;
+			case CODE_LOAD_LOCAL | CODE_STORE_LOCAL | CODE_LOAD_UPVALUE | CODE_STORE_UPVALUE | CODE_LOAD_FIELD_THIS | CODE_STORE_FIELD_THIS |
+				CODE_LOAD_FIELD | CODE_STORE_FIELD | CODE_CLASS:
+				1;
+			case CODE_CONSTANT | CODE_LOAD_MODULE_VAR | CODE_STORE_MODULE_VAR | CODE_CALL_0 | CODE_CALL_1 | CODE_CALL_2 | CODE_CALL_3 | CODE_CALL_4 | CODE_CALL_5 | CODE_CALL_6 | CODE_CALL_7 | CODE_CALL_8 |
+				CODE_CALL_9 | CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 | CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16 | CODE_JUMP
+				| CODE_LOOP | CODE_JUMP_IF | CODE_AND | CODE_OR | CODE_METHOD_INSTANCE | CODE_METHOD_STATIC | CODE_IMPORT_MODULE | CODE_IMPORT_VARIABLE: 2;
+			case CODE_SUPER_0 | CODE_SUPER_1 | CODE_SUPER_2 | CODE_SUPER_3 | CODE_SUPER_4 | CODE_SUPER_5 | CODE_SUPER_6 | CODE_SUPER_7 | CODE_SUPER_8 |
+				CODE_SUPER_9 | CODE_SUPER_10 | CODE_SUPER_11 | CODE_SUPER_12 | CODE_SUPER_13 | CODE_SUPER_14 | CODE_SUPER_15 | CODE_SUPER_16: 4;
+			case CODE_CLOSURE:{
+				var constant = (bytecode[ip + 1] << 8) | bytecode[ip + 2];
+				var loadedFn:ObjFn = constants[constant].AS_FUN();
+		  
+				// There are two bytes for the constant, then two for each upvalue.
+				return 2 + (loadedFn.numUpvalues * 2);
+			}
+		}
 	}
 }

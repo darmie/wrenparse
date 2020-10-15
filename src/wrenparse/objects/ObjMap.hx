@@ -176,13 +176,14 @@ class ObjMap extends Obj {
 			if (value.IS_OBJ())
 				vm.pushRoot(value.AS_OBJ());
 			this.count--;
-			for (e in entries) {
+			for (e in entries.arr) {
 				if (e.key == key)
-					entries.remove(e);
+					entries.arr.remove(e);
 			}
 			if (value.IS_OBJ())
 				vm.popRoot();
 		}
+		return value;
 	}
 
 	public static function validateKey(vm:VM, arg:Value) {

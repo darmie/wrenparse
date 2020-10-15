@@ -1,13 +1,9 @@
 package wrenparse;
 
-import wrenparse.objects.ObjClass;
-import wrenparse.objects.ObjInstance;
+
 import haxe.ds.Vector;
 import haxe.Int64;
-import wrenparse.objects.ObjRange;
-import wrenparse.objects.ObjString;
-import wrenparse.objects.ObjFn;
-import wrenparse.objects.Obj;
+import wrenparse.objects.*;
 import wrenparse.IO.Buffer;
 import polygonal.ds.ArrayList;
 
@@ -24,7 +20,7 @@ typedef ValueBuffer = Buffer<Value>;
 
 class ValuePointer {
 	public var arr:ArrayList<Value>;
-	var index: Int;
+	public var index: Int;
 
 	public function new(arr:ArrayList<Value>, index: Int = 0) {
 		this.arr = arr;
@@ -67,6 +63,18 @@ class ValuePointer {
 
 	public inline function lt(pointer: ValuePointer): Bool {
 		return index < pointer.index;
+	}
+
+	public inline function gt(pointer: ValuePointer): Bool {
+		return index > pointer.index;
+	}
+
+	public inline function gte(pointer: ValuePointer): Bool {
+		return index >= pointer.index;
+	}
+
+	public inline function lte(pointer: ValuePointer): Bool {
+		return index <= pointer.index;
 	}
 }
 
@@ -131,6 +139,7 @@ class Value {
 	}
 
 
+
 	public inline function AS_INSTANCE() {
 		var obj:ObjInstance = cast this.AS_OBJ();
 		return obj;
@@ -163,8 +172,12 @@ class Value {
 		return cast this.as.obj;
 	}
 
+	public inline function AS_MODULE():ObjModule {
+		return cast this.as.obj;
+	}
 
 
+	public inline function IS_BOOL() return IS_FALSE() || IS_TRUE();
 	public inline function IS_FALSE() {
 		return this.type == VAL_FALSE;
 	}
@@ -173,8 +186,20 @@ class Value {
 		return this.type == VAL_TRUE;
 	}
 
+	public  inline function AS_BOOL():Bool {
+		return IS_TRUE() ? true : false;
+	}
+
 	public inline function IS_NUM() {
 		return this.type == VAL_NUM;
+	}
+
+	public inline function IS_STRING() {
+		return this.type == VAL_OBJ && this.as.obj.type == OBJ_STRING;
+	}
+
+	public inline function IS_CLASS() {
+		return this.type == VAL_OBJ && this.as.obj.type == OBJ_CLASS;
 	}
 
 	public inline function IS_UNDEFINED() {
@@ -187,6 +212,10 @@ class Value {
 
 	public inline function IS_LIST() {
 		return IS_OBJ() && AS_OBJ().type == OBJ_LIST;
+	}
+
+	public inline function IS_RANGE() {
+		return IS_OBJ() && AS_OBJ().type == OBJ_RANGE;
 	}
 
 	public inline function IS_MAP() {

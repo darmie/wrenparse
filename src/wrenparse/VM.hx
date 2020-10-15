@@ -7,6 +7,7 @@ import wrenparse.IO.Buffer;
 import polygonal.ds.ArrayList;
 import wrenparse.objects.*;
 import wrenparse.Compiler;
+import wrenparse.IO.SymbolTable;
 
 enum ErrorType {
 	// A syntax or resolution error detected at compile time.
@@ -28,7 +29,7 @@ typedef WrenHandle = {
 	?value:Value,
 
 	?prev:WrenHandle,
-	?nextWrenHandle,
+	?next:WrenHandle,
 }
 
 // The type of an object stored in a slot.
@@ -63,7 +64,7 @@ enum WrenType {
 //
 // - To free memory, [memory] will be the memory to free and [newSize] will be
 //   zero. It should return NULL.
-typedef WrenReallocateFn = (vm:VM, memory:Array<Dynamic>, size:Int) -> Array<Dynamic>;
+typedef WrenReallocateFn = (vm:VM, memory:Dynamic, size:Int) -> Array<Dynamic>;
 
 /**
  * A function callable from Wren code, but implemented in Haxe.
@@ -74,7 +75,7 @@ typedef WrenForeignMethodFn = (vm:VM) -> Void;
 // class. Unlike most foreign methods, finalizers do not have access to the VM
 // and should not interact with it since it's in the middle of a garbage
 // collection.
-typedef WrenFinerlizerFn = (data:Dynamic) -> Void;
+typedef WrenFinalizerFn = (data:Dynamic) -> Void;
 
 // Gives the host a chance to canonicalize the imported module name,
 // potentially taking into account the (previously resolved) name of the module
@@ -96,7 +97,7 @@ typedef WrenForeignClassMethods = {
 	// foreign object's memory.
 	//
 	// This may be `NULL` if the foreign class does not need to finalize.
-	?finalize:WrenFinerlizerFn
+	?finalize:WrenFinalizerFn
 }
 
 typedef WrenBindForeignClassFn = (vm:VM, module:String, className:String) -> WrenForeignClassMethods;
@@ -212,7 +213,7 @@ typedef VMConfig = {
 	// If zero, defaults to 50.
 	heapGrowthPercent:Int,
 	// User-defined data associated with the VM.
-	userData:Dynamic;
+	userData:Dynamic
 }
 
 class VM {
@@ -245,6 +246,7 @@ class VM {
 	public var fnClass:ObjClass;
 	public var listClass:ObjClass;
 	public var mapClass:ObjClass;
+	public var fiberClass:ObjClass;
 
 	public var grayCapacity:Int;
 	public var grayCount:Int;
@@ -258,22 +260,10 @@ class VM {
 
 	public var handles:WrenHandle;
 
+	public var lastModule:ObjModule;
+
 	public function new(config:VMConfig) {
 		this.config = config;
-	}
-
-	public function interpret(moduleName:String, code:String):WrenInterpretResult {
-		// var parser = new WrenParser(byte.ByteData.ofString(code), sourcePath);
-		// this.compiler = Compiler.init(parser);
-		var closure = compileSource(moduleName, code);
-		if (closure == null)
-			return WREN_RESULT_COMPILE_ERROR;
-		pushRoot(closure);
-		var fiber = new ObjFiber(this, closure);
-		popRoot(); // fiber
-		this.apiStack = null;
-
-		return runInterpreter(fiber);
 	}
 
 	public function compileSource(moduleName:String, code:String, isExpression:Bool = false, printErrors:Bool = true):ObjClosure {
@@ -359,7 +349,26 @@ class VM {
 		}
 	}
 
-	public function dumpCode(fn:ObjFn) {}
+	public function dumpCode(fn:ObjFn) {
+		#if sys
+		Sys.println('${fn.module.name == null ? "<core>" : fn.module.name.value.join("")}: ${fn.debug.name}');
+		#else
+		trace('${fn.module.name == null ? "<core>" : fn.module.name.value.join("")}: ${fn.debug.name}');
+		#end
+
+		var i = 0;
+		var lastLine = -1;
+		while (true) {
+			var offset = dumpInstruction(fn, i, lastLine);
+			if (offset == -1)
+				break;
+			i += offset;
+		}
+	}
+
+	public function dumpInstruction(fn:ObjFn, i:Int, lastLine:Int):Int {
+		return 0;
+	}
 
 	public function reallocate(memory:Dynamic, oldSize:Int, newSize:Int) {}
 
@@ -381,7 +390,7 @@ class VM {
 			#if cpp
 			this.gray = this.config.reallocateFn(this, this.gray, this.grayCapacity * cpp.sizeof(Obj));
 			#else
-			this.gray = this.config.reallocateFn(this, this.gray, this.grayCapacity * 256);
+			this.gray = cast this.config.reallocateFn(this, this.gray, this.grayCapacity * 256);
 			#end
 		}
 
@@ -497,10 +506,10 @@ class VM {
 		Utils.ASSERT(method.value.IS_CLOSURE(), "Method must be a method handle.");
 		Utils.ASSERT(this.fiber != null, "Must set up arguments for call first.");
 		Utils.ASSERT(this.apiStack != null, "Must set up arguments for call first.");
-		Utils.ASSERT(this.fiber -> numFrames == 0, "Can not call from a foreign method.");
+		Utils.ASSERT(this.fiber.numFrames == 0, "Can not call from a foreign method.");
 
 		var closure = method.value.AS_CLOSURE();
-		Utils.ASSERT(this.fiber.stackTop - fiber.stack >= closure.arity, "Stack must have enough arguments for method.");
+		Utils.ASSERT(this.fiber.stackTop.sub(fiber.stack) >= closure.arity, "Stack must have enough arguments for method.");
 
 		// Clear the API stack. Now that wrenCall() has control, we no longer need
 		// it. We use this being non-null to tell if re-entrant calls to foreign
@@ -510,9 +519,9 @@ class VM {
 
 		// Discard any extra temporary slots. We take for granted that the stub
 		// function has exactly one slot for each argument.
-		this.fiber.stackTop = this.fiber.stack.value(closure.maxSlots);
+		this.fiber.stackTop = this.fiber.stack.pointer(closure.maxSlots);
 
-		this.fiber.callFunction(closure, 0);
+		this.fiber.callFunction(this, closure, 0);
 		var result = runInterpreter(this.fiber);
 		// If the call didn't abort, then set up the API stack to point to the
 		// beginning of the stack so the host can access the call's return value.
@@ -555,7 +564,7 @@ class VM {
 		// Wrap the function in a closure and then in a handle. Do this here so it
 		// doesn't get collected as we fill it in.
 		var value = makeHandle(fn.OBJ_VAL());
-		value.value = new ObjClosure(this, fn).OBJ_VAL();
+		value.value = ObjClosure.fromFn(this, fn).OBJ_VAL();
 		fn.code.write(CODE_CALL_0 + numParams);
 		fn.code.write((method >> 8) & 0xff);
 		fn.code.write(method & 0xff);
@@ -599,7 +608,7 @@ class VM {
 
 		// Grow the stack if needed.
 		var needed = apiStack.sub(fiber.stack) + numSlots;
-		ensureStack(fiber, needed);
+		fiber.ensureStack(this, needed);
 
 		fiber.stackTop.setValue(0, apiStack.value(numSlots));
 	}
@@ -647,7 +656,7 @@ class VM {
 	public function getSlotBool(slot:Int) {
 		validateApiSlot(slot);
 		Utils.ASSERT(this.apiStack.value(slot).IS_BOOL(), "Slot must hold a bool.");
-		this.apiStack.value(slot).asBool();
+		return this.apiStack.value(slot).AS_BOOL();
 	}
 
 	public function getSlotString(slot:Int):String {
@@ -666,7 +675,7 @@ class VM {
 
 	public function getSlotForeign(slot:Int) {
 		validateApiSlot(slot);
-		Utils.ASSERT(this.apiStack.value(slot).IS_FOREIGN()), "Slot must hold a foreign instance.");
+		Utils.ASSERT(this.apiStack.value(slot).IS_FOREIGN(), "Slot must hold a foreign instance.");
 
 		this.apiStack.value(slot).AS_FOREIGN();
 	}
@@ -695,14 +704,14 @@ class VM {
 		setSlot(slot, ObjString.newString(this, string));
 	}
 
-	public function setSlotForeign(slot:Int, classSlot:Int, data:Dynamic) {
+	public function setSlotNewForeign(slot:Int, classSlot:Int, data:Dynamic) {
 		validateApiSlot(slot);
 		validateApiSlot(classSlot);
-		setSlot(slot, ObjString.newString(this, string));
+
 		Utils.ASSERT(apiStack.value(classSlot).IS_CLASS(), "Slot must hold a class.");
 		var classObj = apiStack.value(classSlot).AS_CLASS();
 		Utils.ASSERT(classObj.numFields == -1, "Class must be a foreign class.");
-		var foreign = ObjForeign(vm, classObj, data);
+		var foreign = new ObjForeign(this, classObj, data);
 		apiStack.setValue(slot, foreign.OBJ_VAL());
 
 		return foreign.data;
@@ -768,7 +777,7 @@ class VM {
 		if (!ObjMap.validateKey(this, key))
 			return false;
 		var map = apiStack.value(mapSlot).AS_MAP();
-		var value = map.get(key);
+		var value = map.get(this, key);
 		return !value.IS_UNDEFINED();
 	}
 
@@ -776,21 +785,21 @@ class VM {
 		validateApiSlot(mapSlot);
 		validateApiSlot(keySlot);
 		validateApiSlot(valueSlot);
-		Utils.ASSERT(apiStack.value(slot).IS_MAP(), "Slot must hold a map.");
+		Utils.ASSERT(apiStack.value(mapSlot).IS_MAP(), "Slot must hold a map.");
 		var map = apiStack.value(mapSlot).AS_MAP();
 		var key = apiStack.value(keySlot);
-		var value = map.get(key);
+		var value = map.get(this, key);
 		if (value.IS_UNDEFINED()) {
 			value = Value.NULL_VAL();
 		}
-		apiSlot.setValue(valueSlot, value);
+		apiStack.setValue(valueSlot, value);
 	}
 
 	public function setMapValue(mapSlot:Int, keySlot:Int, valueSlot:Int) {
 		validateApiSlot(mapSlot);
 		validateApiSlot(keySlot);
 		validateApiSlot(valueSlot);
-		Utils.ASSERT(apiStack.value(slot).IS_MAP(), "Must insert into a map.");
+		Utils.ASSERT(apiStack.value(mapSlot).IS_MAP(), "Must insert into a map.");
 		var key = apiStack.value(keySlot);
 		if (!ObjMap.validateKey(this, key)) {
 			return;
@@ -798,14 +807,14 @@ class VM {
 
 		var value = apiStack.value(valueSlot);
 		var map = apiStack.value(mapSlot).AS_MAP();
-		map.set(key, value);
+		map.set(this, key, value);
 	}
 
 	public function removeMapValue(mapSlot:Int, keySlot:Int, removedValueSlot:Int) {
 		validateApiSlot(mapSlot);
 		validateApiSlot(keySlot);
 		validateApiSlot(removedValueSlot);
-		Utils.ASSERT(apiStack.value(slot).IS_MAP(), "Slot must hold a map.");
+		Utils.ASSERT(apiStack.value(mapSlot).IS_MAP(), "Slot must hold a map.");
 		var key = apiStack.value(keySlot);
 		if (!ObjMap.validateKey(this, key)) {
 			return;
@@ -819,7 +828,7 @@ class VM {
 		Utils.ASSERT(module != null, "Module cannot be NULL.");
 		Utils.ASSERT(name != null, "Variable name cannot be NULL.");
 
-		var moduleName = ObjString.format(vm, "$", [module]);
+		var moduleName = ObjString.format(this, "$", [module]);
 		pushRoot(moduleName.AS_OBJ());
 		var moduleObj = getModule(moduleName);
 		Utils.ASSERT(moduleObj != null, "Could not find module.");
@@ -843,25 +852,15 @@ class VM {
 		config.userData = userData;
 	}
 
-	public function ensureStack(fiber:ObjFiber, needed:Int) {
-		if (fiber.stackCapacity >= needed)
-			return;
-
-		var capacity = Utils.wrenPowerOf2Ceil(needed);
-		var oldStack = fiber.stack;
-		fiber.stack = new ValuePointer(new ArrayList(capacity, fiber.stack.arr.toArray()));
-		fiber.stackCapacity = capacity;
-	}
-
 	public function checkArity(value:Value, numArgs:Int):Bool {
 		Utils.ASSERT(value.IS_CLOSURE(), "Receiver must be a closure.");
-		var fn = value.AS_CLOSURE().fn;
+		var fn:ObjFn = cast value.AS_CLOSURE();
 		// We only care about missing arguments, not extras. The "- 1" is because
 		// numArgs includes the receiver, the function itself, which we don't want to
 		// count.
 		if (numArgs - 1 >= fn.arity)
 			return true;
-		fiber.error = ObjString.CONST_STRING(vm, "Function expects more arguments.");
+		fiber.error = ObjString.CONST_STRING(this, "Function expects more arguments.");
 		return false;
 	}
 
@@ -907,7 +906,7 @@ class VM {
 
 		while (i >= 0) {
 			var frame = fiber.frames[i];
-			var fn = frame.closure.fn;
+			var fn:ObjFn = cast frame.closure;
 			// Skip over stub functions for calling methods from the Haxe API.
 			if (fn.module == null)
 				continue;
@@ -917,9 +916,9 @@ class VM {
 			if (fn.module.name == null)
 				continue;
 			// -1 because IP has advanced past the instruction that it just executed.
-			var dataPointer:Pointer<Int> = new Pointer(new ArrayList(fn.code.data.length, fn.code.data));
-			var line = fn.debug.sourceLines.data[frame.ip.value(fn.code.data.pointer(-1))];
-			config.errorFn(this, WREN_ERROR_RUNTIME, fn.module.name.value, line, fn.debug.name);
+			var dataPointer:Pointer<Int> = new Pointer(fn.code.data);
+			var line = fn.debug.sourceLines.data[frame.ip.sub(dataPointer.pointer(-1))];
+			config.errorFn(this, WREN_ERROR_RUNTIME, fn.module.name.value.join(""), line, fn.debug.name);
 			i--;
 		}
 	}
@@ -948,7 +947,7 @@ class VM {
 		var classObj = ObjClass.newClass(this, superclass.AS_CLASS(), numFields, name.AS_STRING());
 		fiber.stackTop.setValue(-1, classObj.OBJ_VAL());
 		if (numFields == -1)
-			classObj.bindForeignClass(vm, module);
+			classObj.bindForeignClass(this, module);
 	}
 
 	/**
@@ -975,7 +974,7 @@ class VM {
 			method = new Method(METHOD_FOREIGN);
 			method.as.foreign = findForeignMethod(module.name.value.join(""), className, methodType == CODE_METHOD_STATIC, name);
 			if (method.as.foreign == null) {
-				fiber.error = ObjString.format(vm, "Could not find foreign method '@' for class $ in module '$'.",
+				fiber.error = ObjString.format(this, "Could not find foreign method '@' for class $ in module '$'.",
 					[methodValue, classObj.name.value.join(""), module.name.value.join("")]);
 				return;
 			}
@@ -984,10 +983,21 @@ class VM {
 			method.as.closure = methodValue.AS_CLOSURE();
 
 			// Patch up the bytecode now that we know the superclass.
-			classObj.bindMethodCode(method.as.closure.fn);
+			classObj.bindMethodCode(method.as.closure);
 		}
 
 		classObj.bindMethod(this, symbol, method);
+	}
+
+	public function findForeignMethod(moduleName:String, className:String, isStatic:Bool, signature:String):WrenForeignMethodFn {
+		var method = null;
+		if (config.bindForeignMethodFn != null) {
+			method = config.bindForeignMethodFn(this, moduleName, className, isStatic, signature);
+		}
+		// If the host didn't provide it, see if it's an optional one.
+		if (method == null) {}
+
+		return method;
 	}
 
 	/**
@@ -997,15 +1007,15 @@ class VM {
 	 */
 	public function resolveModule(name:Value):Value {
 		// If the host doesn't care to resolve, leave the name alone.
-		if (vm.config.resolveModuleFn == null)
+		if (this.config.resolveModuleFn == null)
 			return name;
 		var fiber = this.fiber;
-		var fn = fiber.frames[fiber.numFrames - 1].closure.fn;
+		var fn:ObjFn = fiber.frames[fiber.numFrames - 1].closure;
 		var importer = fn.module.name;
 		var resolved = config.resolveModuleFn(this, importer.value.join(""), name.AS_CSTRING());
 
 		if (resolved == null) {
-			fiber.error = ObjString.format(vm, "Could not resolve module '@' imported from '@'.", [name, importer.OBJ_VAL()]);
+			fiber.error = ObjString.format(this, "Could not resolve module '@' imported from '@'.", [name, importer.OBJ_VAL()]);
 			return Value.NULL_VAL();
 		}
 		// If they resolved to the exact same string, we don't need to copy it.
@@ -1030,7 +1040,7 @@ class VM {
 		var allocatedSource = true;
 		// Let the host try to provide the module.
 		if (config.loadModuleFn != null) {
-			source = config.loadModuleFn(vm, name.AS_CSTRING());
+			source = config.loadModuleFn(this, name.AS_CSTRING());
 		}
 
 		// If the host didn't provide it, see if it's a built in optional module.
@@ -1114,7 +1124,7 @@ class VM {
 		}
 
 		if (superclass.numFields + numFields > Compiler.MAX_FIELDS) {
-			return ObjString.format(this, "Class '@' may not have more than 255 fields, including inherited " "ones.", [name]);
+			return ObjString.format(this, "Class '@' may not have more than 255 fields, including inherited ones.", [name]);
 		}
 
 		return Value.NULL_VAL();
@@ -1280,8 +1290,8 @@ class VM {
 			}
 
 			switch (instruction = READ_BYTE()) {
-				case CODE_LOAD_LOCAL_0 | CODE_LOAD_LOCAL_1 | CODE_LOAD_LOCAL_3 | CODE_LOAD_LOCAL_4 | CODE_LOAD_LOCAL_5 | CODE_LOAD_LOCAL_6 |
-					CODE_LOAD_LOCAL_7 | CODE_LOAD_LOCAL_8:
+				case CODE_LOAD_LOCAL_0 | CODE_LOAD_LOCAL_1 | CODE_LOAD_LOCAL_2 | CODE_LOAD_LOCAL_3 | CODE_LOAD_LOCAL_4 | CODE_LOAD_LOCAL_5 |
+					CODE_LOAD_LOCAL_6 | CODE_LOAD_LOCAL_7 | CODE_LOAD_LOCAL_8:
 					{
 						PUSH(stackStart.value(instruction - CODE_LOAD_LOCAL_0));
 						continue;
@@ -1306,6 +1316,21 @@ class VM {
 						DROP();
 						continue;
 					}
+				case CODE_NULL:
+					PUSH(Value.NULL_VAL());
+					continue;
+				case CODE_FALSE:
+					PUSH(Value.BOOL_VAL(false));
+					continue;
+				case CODE_TRUE:
+					PUSH(Value.BOOL_VAL(true));
+					continue;
+				case CODE_STORE_LOCAL:
+					stackStart.setValue(READ_BYTE(), PEEK());
+					continue;
+				case CODE_CONSTANT:
+					PUSH(fn.constants.data[READ_SHORT()]);
+					continue;
 				case CODE_CALL_0 | CODE_CALL_1 | CODE_CALL_2 | CODE_CALL_3 | CODE_CALL_4 | CODE_CALL_5 | CODE_CALL_6 | CODE_CALL_7 | CODE_CALL_8 |
 					CODE_CALL_9 | CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 | CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16:
 					{
@@ -1457,7 +1482,7 @@ class VM {
 						var result = POP();
 						fiber.numFrames--;
 						// Close any upvalues still in scope.
-						fiber.closeUpvalues(fiber.stackStart);
+						fiber.closeUpvalues(stackStart);
 						// If the fiber is complete, end it.
 						if (fiber.numFrames == 0) {
 							// See if there's another fiber to return to. If not, we're done.
@@ -1491,7 +1516,7 @@ class VM {
 				case CODE_CONSTRUCT:
 					{
 						Utils.ASSERT(stackStart.value().IS_CLASS(), "'this' should be a class.");
-						stackStart.setValue(0, stackStart.value().AS_CLASS().newInstance());
+						stackStart.setValue(0, ObjInstance.newInstance(this, stackStart.value().AS_CLASS()));
 						continue;
 					}
 				case CODE_FOREIGN_CONSTRUCT:
@@ -1505,7 +1530,7 @@ class VM {
 						// Create the closure and push it on the stack before creating upvalues
 						// so that it doesn't get collected.
 						var func = fn.constants.data[READ_SHORT()].AS_FUN();
-						var closure = new ObjClosure(this, func);
+						var closure = ObjClosure.fromFn(this, func);
 						PUSH(closure.OBJ_VAL());
 						// Capture upvalues, if any.
 						for (i in 0...func.numUpvalues) {
@@ -1513,7 +1538,7 @@ class VM {
 							var index = READ_BYTE();
 							if (isLocal != null) {
 								// Make an new upvalue to close over the parent's local variable.
-								closure.upValues[i] = fiber.captureUpvalue(this, frame.stackStart.pointer(index));
+								closure.upValues[i] = fiber.captureUpvalues(this, frame.stackStart.pointer(index));
 							} else {
 								// Use the same upvalue as the current call frame.
 								closure.upValues[i] = frame.closure.upValues[index];
@@ -1576,7 +1601,7 @@ class VM {
 					}
 				case CODE_END_MODULE:
 					{
-						lastModule = fn.module;
+						this.lastModule = fn.module;
 						PUSH(Value.NULL_VAL());
 						continue;
 					}
@@ -1602,20 +1627,20 @@ class VM {
 						if (PEEK().IS_CLOSURE()) {
 							STORE_FRAME();
 							var closure = PEEK().AS_CLOSURE();
-							fiber.callFunction(closure, 1);
+							fiber.callFunction(this, closure, 1);
 							LOAD_FRAME();
 						} else {
 							// The module has already been loaded. Remember it so we can import
 							// variables from it if needed.
-							lastModule = PEEK().AS_MODULE();
+							this.lastModule = PEEK().AS_MODULE();
 						}
 						continue;
 					}
 				case CODE_IMPORT_VARIABLE:
 					{
 						var variable = fn.constants.data[READ_SHORT()];
-						Utils.ASSERT(lastModule != null, "Should have already imported module.");
-						var result = lastModule.getModuleVariable(this, variable);
+						Utils.ASSERT(this.lastModule != null, "Should have already imported module.");
+						var result = this.lastModule.getModuleVariable(this, variable);
 						if (fiber.hasError()) {
 							// RUNTIME_ERROR
 							do {
