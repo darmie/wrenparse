@@ -1407,7 +1407,6 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 					{expr: EBreak, pos: p};
 				}
 			case [{tok: Kwd(KwdReturn), pos: p}]:
-				trace("here");
 				#if WREN_COMPILE
 				this.vm.compiler.emitOp(CODE_RETURN);
 				#end
@@ -1951,12 +1950,13 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 											callSignature(CODE_CALL_0, called);
 										}
 									} else {
-										switch expr.expr {
-											case EConst(CIdent(s)) | EConst(CInt(s)) | EConst(CFloat(s)) | EConst(CString(s)): {
-													this.vm.compiler.emitConstant(ObjString.newString(this.vm, s));
-												}
-											case _:
-										}
+										// switch expr.expr {
+										// 	case EConst(CIdent(s)) | EConst(CInt(s)) | EConst(CFloat(s)) | EConst(CString(s)): {
+										// 			trace(s);
+										// 			this.vm.compiler.emitConstant(ObjString.newString(this.vm, s));
+										// 		}
+										// 	case _:
+										// }
 									}
 									#end
 									break;
