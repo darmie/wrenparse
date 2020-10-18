@@ -8,35 +8,45 @@
 -lib hxparse
 -lib polygonal-ds
 
---dce  full
--D debug
+--dce no
+
 -D WREN_DEBUG_DUMP_COMPILED_CODE
+-D WREN_COMPILE
 
 --each
 --interp
 
 --next
+--cmd echo "cpp"
 --cpp bin/cpp
 
 
 --next
-
+--cmd echo "jvm"
 --jvm bin/jvm/Test.jar
+
+--next
+--cmd echo "java"
+--java bin/java/test
 
 
 --next
+--cmd echo "nodejs"
 -lib hxnodejs
 --js bin/js/Test.js
 
 
---next
---cs bin/cs/Test
+# --next
+# --cmd echo "c#"
+# --cs bin/cs/Test
 
 
 --next 
+--cmd echo "python"
 --python bin/py/Test.py
 
 --next
+--cmd echo "neko"
 --neko bin/neko/Test.n
 
 

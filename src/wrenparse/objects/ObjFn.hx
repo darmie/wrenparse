@@ -59,7 +59,7 @@ class ObjFn extends Obj {
 
     public function bindName(vm:VM, name:String) {
         this.debug.name = name;
-        this.debug.name += "\\0";
+        this.debug.name += String.fromCharCode(0);
     }
 }
 

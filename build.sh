@@ -2,16 +2,19 @@ echo "Macro"
 haxe test.hxml
 
 echo "C++"
-bin/cpp/Test.exe
+bin/cpp/Test
 
 echo "JVM"
 java -jar bin/jvm/Test.jar
 
+echo "java"
+java -jar bin/java/test/Test.jar
+
 echo "JS"
 node bin/js/Test.js
 
-echo "C#"
-bin/cs/Test/bin/Test.exe
+# echo "C#"
+# bin/cs/Test/bin/Test.exe
 
 echo "Python"
 python bin/py/Test.py

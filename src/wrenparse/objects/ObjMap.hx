@@ -65,7 +65,7 @@ class ObjMap extends Obj {
 		this.type = OBJ_MAP;
 		this.capacity = 0;
 		this.count = 0;
-		this.entries = null;
+		this.entries = new Pointer([]);
 		baseMap = new Map();
 	}
 
@@ -75,6 +75,13 @@ class ObjMap extends Obj {
 		// 	return entry.value;
 
 		// return Value.UNDEFINED_VAL();
+		if(key.type == VAL_NULL){
+			for(_v in baseMap.keys()){
+				if(_v.IS_NULL()){
+					return baseMap.get(_v);
+				}
+			}
+		}
 		var v = baseMap.get(key);
 		if (v == null)
 			return Value.UNDEFINED_VAL();
@@ -94,7 +101,7 @@ class ObjMap extends Obj {
 		// 	// A new key was added.
 		// 	count++;
 		// }
-
+		
 		this.baseMap.set(key, value);
 		this.entries.setValue(0, new MapEntry(key, value));
 		this.count++;

@@ -74,33 +74,34 @@ class Obj {
 	}
 
 	public function dump() {
-		switch (type) {
+
+		return switch (type) {
 			case OBJ_CLASS:
-				trace('[class ${cast (this, ObjClass).name.value.join("")} $this]');
+				return ('[class ${cast (this, ObjClass).name.value.join("")} $this]');
 			case OBJ_CLOSURE:
-				trace('[closure $this]');
+				return ('[closure $this]');
 			case OBJ_FIBER:
-				trace('[fiber $this]');
+				return ('[fiber $this]');
 			case OBJ_FN:
-				trace('[fn $this]');
+				return ('[fn $this]');
 			case OBJ_FOREIGN:
-				trace('[foreign $this]');
+				return ('[foreign $this]');
 			case OBJ_INSTANCE:
-				trace('[instance $this]');
+				return ('[instance $this]');
 			case OBJ_LIST:
-				trace('[list $this]');
+				return ('[list $this]');
 			case OBJ_MAP:
-				trace('[map $this]');
+				return ('[map $this]');
 			case OBJ_MODULE:
-				trace('[module $this]');
+				return ('[module $this]');
 			case OBJ_RANGE:
-				trace('[range $this]');
+				return ('[range $this]');
 			case OBJ_STRING:
-				trace(cast (this, ObjString).value.join(""));
+				return (cast (this, ObjString).value.join(""));
 			case OBJ_UPVALUE:
-				trace('[upvalue $this]');
+				return ('[upvalue $this]');
 			default:
-				trace('[unknown object $type]');
+				return ('[unknown object $type]');
 		}
 	}
 }

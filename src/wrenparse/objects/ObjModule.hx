@@ -40,7 +40,7 @@ class ObjModule extends Obj {
 		vm.popRoot();
 	}
 
-	public function defineVariable(vm:VM, name:String, length:Int, value:Value, line:Int):Int {
+	public function defineVariable(vm:VM, name:String, length:Int, value:Value, line:Null<Int>):Int {
 		if (variables.count == Compiler.MAX_MODULE_VARS)
 			return -2;
 		if (value.IS_OBJ())

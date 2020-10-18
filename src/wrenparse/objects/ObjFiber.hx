@@ -1,5 +1,6 @@
 package wrenparse.objects;
 
+import wrenparse.Pointer.DataPointer;
 import polygonal.ds.ArrayList;
 import wrenparse.Value;
 import wrenparse.Value.ValuePointer;
@@ -170,7 +171,7 @@ class ObjFiber extends Obj {
 		var frame = frames[numFrames++];
 		frame.stackStart = stackStart;
 		frame.closure = closure;
-		frame.ip = new Pointer(closure.code.data);
+		frame.ip = new DataPointer(closure.code.data);
 	}
 
 	public function closeUpvalues(last:ValuePointer) {

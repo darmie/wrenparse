@@ -73,8 +73,8 @@ var x = 1 != 2 ? "math is sane" : "math is not sane!" // ternary
 var object = {
     "key": 4,
     1.2: "hello"
-    // here
 }
+
 class General {
 	construct new(){
 	    if(a){
@@ -87,7 +87,7 @@ class General {
 	name{"boy"}
 
 	foreign static runner()
-	method(var1, var2){
+	methodX(var1, var2){
 		var b = {
 			"k": var1,
 			"hey": var2

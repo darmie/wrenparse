@@ -45,7 +45,7 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 	static var ident = "_*[a-zA-Z][a-zA-Z0-9_]*|_+|_+[0-9][_a-zA-Z0-9]*";
 	static var integer = "([1-9][0-9]*)|0";
 
-	public static var lineCount = 0;
+	public static var lineCount = 1;
 
 
 	// @:rule wraps the expression to the right of => with function(lexer) return
@@ -74,6 +74,7 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 		// integer + "\\.\\." => mk(lexer, IntInterval(lexer.current.substr(0, -2), false)),
 		// integer + "\\.\\.\\." => mk(lexer, IntInterval(lexer.current.substr(0, -3), true)),
 		"//[^\n\r]*" =>{
+			lineCount++;
 			mk(lexer, CommentLine(lexer.current.substr(2)));
 		},
 		"~" => mk(lexer, Unop(OpNegBits)),
@@ -199,11 +200,14 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 		// 	buf.add(lexer.current);
 		// 	lexer.token(codeString);
 		// },
-		"[\r\n\t ]+" => {
-			lineCount++;
+		"[\r\t ]+" => {
 			buf.add(lexer.current);
 			lexer.token(codeString);
-		}
+		},
+		"[\n]+" =>{
+			lineCount++;
+			lexer.token(comment);
+		},
 	];
 
 	static var commentBuf:StringBuf;
@@ -221,7 +225,11 @@ class WrenLexer extends Lexer implements hxparse.RuleBuilder {
 			buf.add("*");
 			lexer.token(comment);
 		},
-		"[\r\n\t ]+" => {
+		"[\r\t ]+" => {
+			lexer.token(comment);
+		},
+		"[\n]+" =>{
+			lineCount++;
 			lexer.token(comment);
 		},
 		"[^\\*]+" => {

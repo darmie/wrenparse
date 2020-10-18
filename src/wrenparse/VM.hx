@@ -1,5 +1,7 @@
 package wrenparse;
 
+import wrenparse.Pointer.DataPointer;
+import haxe.Int32;
 import wrenparse.objects.ObjClass.Method;
 import wrenparse.Value.ValuePointer;
 import wrenparse.Value.ValueBuffer;
@@ -64,7 +66,7 @@ enum WrenType {
 //
 // - To free memory, [memory] will be the memory to free and [newSize] will be
 //   zero. It should return NULL.
-typedef WrenReallocateFn = (vm:VM, memory:Dynamic, size:Int) -> Array<Dynamic>;
+typedef WrenReallocateFn = (vm:VM, memory:Array<Obj>, size:Int) -> Array<Dynamic>;
 
 /**
  * A function callable from Wren code, but implemented in Haxe.
@@ -101,7 +103,7 @@ typedef WrenForeignClassMethods = {
 }
 
 typedef WrenBindForeignClassFn = (vm:VM, module:String, className:String) -> WrenForeignClassMethods;
-typedef WrenErrorFn = (vm:VM, type:ErrorType, mpduleName:String, line:Int, message:String) -> Void;
+typedef WrenErrorFn = (vm:VM, type:ErrorType, moduleName:String, line:Int, message:String) -> Void;
 
 // Displays a string of text to the user.
 typedef WrenWriteFn = (vm:VM, text:String) -> Void;
@@ -112,11 +114,11 @@ typedef VMConfig = {
 	// When an error occurs, this will be called with the module name, line
 	// number, and an error message. If this is `NULL`, Wren doesn't report any
 	// errors.
-	errorFn:WrenErrorFn,
+	?errorFn:WrenErrorFn,
 	// The callback Wren will use to allocate, reallocate, and deallocate memory.
 	//
 	// If `NULL`, defaults to a built-in function that uses `realloc` and `free`.
-	reallocateFn:WrenReallocateFn,
+	?reallocateFn:WrenReallocateFn,
 
 	// The callback Wren uses to resolve a module name.
 	//
@@ -142,7 +144,7 @@ typedef VMConfig = {
 	// Wren will take ownership of the string you return and free it for you, so
 	// it should be allocated using the same allocation function you provide
 	// above.
-	resolveModuleFn:WrenResolveModuleFn,
+	?resolveModuleFn:WrenResolveModuleFn,
 	// The callback Wren uses to load a module.
 	//
 	// Since Wren does not talk directly to the file system, it relies on the
@@ -158,7 +160,7 @@ typedef VMConfig = {
 	//
 	// If a module with the given name could not be found by the embedder, it
 	// should return NULL and Wren will report that as a runtime error.
-	loadModuleFn:WrenLoadModuleFn,
+	?loadModuleFn:WrenLoadModuleFn,
 	// The callback Wren uses to find a foreign method and bind it to a class.
 	//
 	// When a foreign method is declared in a class, this will be called with the
@@ -168,24 +170,24 @@ typedef VMConfig = {
 	//
 	// If the foreign function could not be found, this should return NULL and
 	// Wren will report it as runtime error.
-	bindForeignMethodFn:WrenBindForeignMethodFn,
+	?bindForeignMethodFn:WrenBindForeignMethodFn,
 	// The callback Wren uses to find a foreign class and get its foreign methods.
 	//
 	// When a foreign class is declared, this will be called with the class's
 	// module and name when the class body is executed. It should return the
 	// foreign functions uses to allocate and (optionally) finalize the bytes
 	// stored in the foreign object when an instance is created.
-	bindForeignClassFn:WrenBindForeignClassFn,
+	?bindForeignClassFn:WrenBindForeignClassFn,
 	// The callback Wren uses to display text when `System.print()` or the other
 	// related functions are called.
 	//
 	// If this is `NULL`, Wren discards any printed text.
-	writeFn:WrenWriteFn,
+	?writeFn:WrenWriteFn,
 	// The number of bytes Wren will allocate before triggering the first garbage
 	// collection.
 	//
 	// If zero, defaults to 10MB.
-	initialHeapSize:Int,
+	?initialHeapSize:Int,
 	// After a collection occurs, the threshold for the next collection is
 	// determined based on the number of bytes remaining in use. This allows Wren
 	// to shrink its memory usage automatically after reclaiming a large amount
@@ -196,7 +198,7 @@ typedef VMConfig = {
 	// back to a usable size.
 	//
 	// If zero, defaults to 1MB.
-	minHeapSize:Int,
+	?minHeapSize:Int,
 	// Wren will resize the heap automatically as the number of bytes
 	// remaining in use after a collection changes. This number determines the
 	// amount of additional memory Wren will use after a collection, as a
@@ -211,9 +213,9 @@ typedef VMConfig = {
 	// frequent garbage collections.
 	//
 	// If zero, defaults to 50.
-	heapGrowthPercent:Int,
+	?heapGrowthPercent:Int,
 	// User-defined data associated with the VM.
-	userData:Dynamic
+	?userData:Dynamic
 }
 
 class VM {
@@ -223,7 +225,7 @@ class VM {
 
 	public var compiler:Compiler;
 
-	public var numTempRoots:Int;
+	public var numTempRoots:Int = 0;
 
 	public static var WREN_MAX_TEMP_ROOTS = 8;
 
@@ -262,19 +264,50 @@ class VM {
 
 	public var lastModule:ObjModule;
 
-	public function new(config:VMConfig) {
+	public function new(?config:VMConfig) {
 		this.config = config;
+		if (config == null) {
+			this.config = {};
+			initConfiguration(this.config);
+		} else {
+			this.config = config;
+		}
+		this.tempRoots = [];
+		this.modules = new ObjMap(this);
+		this.methodNames = new SymbolTable(this);
+		initializeCore();
+	}
+
+	function initializeCore() {
+		var coreModule = new ObjModule(this, null);
+		pushRoot(coreModule);
+		// The core module's key is null in the module map.
+		this.modules.set(this, Value.NULL_VAL(), coreModule.OBJ_VAL());
+		popRoot();
+	}
+
+	public static function initConfiguration(config:VMConfig) {
+		config.reallocateFn = null;
+		config.resolveModuleFn = null;
+		config.loadModuleFn = null;
+		config.bindForeignMethodFn = null;
+		config.bindForeignClassFn = null;
+		config.writeFn = null;
+		config.errorFn = null;
+		config.initialHeapSize = 1024 * 1024 * 10;
+		config.minHeapSize = 1024 * 1024;
+		config.heapGrowthPercent = 50;
+		config.userData = null;
 	}
 
 	public function compileSource(moduleName:String, code:String, isExpression:Bool = false, printErrors:Bool = true):ObjClosure {
 		var nameValue:Value = Value.NULL_VAL();
+
 		if (moduleName != null) {
 			nameValue = new ObjString(this, moduleName).OBJ_VAL();
 			pushRoot(nameValue.as.obj);
 		}
-
 		var closure:ObjClosure = compileInModule(nameValue, code, isExpression, printErrors);
-
 		if (moduleName != null)
 			popRoot(); // nameValue.
 		return closure;
@@ -288,6 +321,7 @@ class VM {
 	public function compileInModule(name:Value, source:String, isExpression:Bool = false, printErrors:Bool = true) {
 		// See if module has already been loaded
 		var module = getModule(name);
+
 		if (module == null) {
 			module = new ObjModule(this, cast name.AS_OBJ());
 			// It's possible for the wrenMapSet below to resize the modules map,
@@ -296,7 +330,6 @@ class VM {
 			pushRoot(module);
 
 			this.modules.set(this, name, module.OBJ_VAL());
-
 			// Store it in the VM's module registry so we don't load the same module
 			// multiple times.
 			popRoot();
@@ -309,6 +342,7 @@ class VM {
 		}
 
 		var fn = Compiler.compile(this, module, source, isExpression, printErrors);
+
 		if (fn == null) {
 			// TODO: Should we still store the module even if it didn't compile?
 			return null;
@@ -323,13 +357,11 @@ class VM {
 	public function pushRoot(obj:Obj) {
 		Utils.ASSERT(obj != null, "Can't root NULL.");
 		Utils.ASSERT(numTempRoots < WREN_MAX_TEMP_ROOTS, "Too many temporary roots.");
-
 		tempRoots[numTempRoots++] = obj;
 	}
 
 	public function popRoot() {
 		Utils.ASSERT(numTempRoots > 0, "No temporary roots to release.");
-
 		numTempRoots--;
 	}
 
@@ -358,16 +390,233 @@ class VM {
 
 		var i = 0;
 		var lastLine = -1;
-		while (true) {
-			var offset = dumpInstruction(fn, i, lastLine);
-			if (offset == -1)
-				break;
+		var offset = 0;
+		while (offset != -1) {
+			offset = dumpInstruction(fn, i, lastLine);
 			i += offset;
 		}
 	}
 
-	public function dumpInstruction(fn:ObjFn, i:Int, lastLine:Int):Int {
-		return 0;
+	public function dumpInstruction(fn:ObjFn, i:Int, lastLine:Null<Int>):Int {
+		var start = i;
+		var bytecode = fn.code.data;
+		var code:Code = bytecode.get(i);
+		var line = fn.debug.sourceLines.data[i];
+		var buf = new StringBuf();
+		if (lastLine == null || lastLine != line) {
+			buf.add(':$line');
+			if (lastLine != -1)
+				lastLine = line;
+		} else {
+			buf.add("     ");
+		}
+		buf.add(' ${i++} ');
+		function READ_BYTE() {
+			return bytecode.get(i++);
+		}
+		function READ_SHORT() {
+			i += 2;
+			return (bytecode.get(i - 2) << 8) | bytecode.get(i - 1);
+		}
+		function BYTE_INSTRUCTION(name:String) {
+			buf.add('$name ${READ_BYTE()}\n');
+		}
+
+		function printf(s:String) {
+			buf.add(s);
+		}
+
+		switch code {
+			case CODE_POP:
+				printf("POP\n");
+			case CODE_CONSTANT:
+				{
+					var constant = READ_SHORT();
+					buf.add('CONSTANT ${constant} \'');
+					// trace(constant, fn.constants.data[constant]);
+
+					buf.add(fn.constants.data[constant].dump());
+
+					buf.add("'\n");
+				}
+			case CODE_NULL:
+				printf("NULL\n");
+			case CODE_FALSE:
+				printf("FALSE\n");
+			case CODE_TRUE:
+				printf("TRUE\n");
+			case CODE_LOAD_LOCAL_0:
+				printf("LOAD_LOCAL_0\n");
+
+			case CODE_LOAD_LOCAL_1:
+				printf("LOAD_LOCAL_1\n");
+
+			case CODE_LOAD_LOCAL_2:
+				printf("LOAD_LOCAL_2\n");
+
+			case CODE_LOAD_LOCAL_3:
+				printf("LOAD_LOCAL_3\n");
+
+			case CODE_LOAD_LOCAL_4:
+				printf("LOAD_LOCAL_4\n");
+
+			case CODE_LOAD_LOCAL_5:
+				printf("LOAD_LOCAL_5\n");
+
+			case CODE_LOAD_LOCAL_6:
+				printf("LOAD_LOCAL_6\n");
+
+			case CODE_LOAD_LOCAL_7:
+				printf("LOAD_LOCAL_7\n");
+
+			case CODE_LOAD_LOCAL_8:
+				printf("LOAD_LOCAL_8\n");
+			case CODE_LOAD_LOCAL:
+				BYTE_INSTRUCTION("LOAD_LOCAL");
+			case CODE_STORE_LOCAL:
+				BYTE_INSTRUCTION("STORE_LOCAL");
+			case CODE_LOAD_UPVALUE:
+				BYTE_INSTRUCTION("LOAD_UPVALUE");
+			case CODE_STORE_UPVALUE:
+				BYTE_INSTRUCTION("STORE_UPVALUE");
+			case CODE_LOAD_MODULE_VAR:
+				{
+					var slot = READ_SHORT();
+					printf('LOAD_MODULE_VAR $slot \'${fn.module.variableNames.data[slot].value.join("")}\'');
+				}
+			case CODE_STORE_MODULE_VAR:
+				{
+					var slot = READ_SHORT();
+					printf('STORE_MODULE_VAR $slot \'${fn.module.variableNames.data[slot].value.join("")}\'');
+				}
+			case CODE_LOAD_FIELD_THIS:
+				BYTE_INSTRUCTION("LOAD_FIELD_THIS");
+			case CODE_STORE_FIELD_THIS:
+				BYTE_INSTRUCTION("STORE_FIELD_THIS");
+			case CODE_LOAD_FIELD:
+				BYTE_INSTRUCTION("LOAD_FIELD");
+			case CODE_STORE_FIELD:
+				BYTE_INSTRUCTION("STORE_FIELD");
+
+			case CODE_CALL_0 | CODE_CALL_1 | CODE_CALL_2 | CODE_CALL_3 | CODE_CALL_4 | CODE_CALL_5 | CODE_CALL_6 | CODE_CALL_7 | CODE_CALL_8 | CODE_CALL_9 |
+				CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 | CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16:
+				{
+					var numArgs = bytecode.get(i - 1) - CODE_CALL_0;
+
+					var symbol = READ_SHORT();
+					printf('CALL_${numArgs} $symbol \'${methodNames.data[symbol].value.join("")}\'');
+				}
+			case CODE_SUPER_0 | CODE_SUPER_1 | CODE_SUPER_2 | CODE_SUPER_3 | CODE_SUPER_4 | CODE_SUPER_5 | CODE_SUPER_6 | CODE_SUPER_7 | CODE_SUPER_8 |
+				CODE_SUPER_9 | CODE_SUPER_10 | CODE_SUPER_11 | CODE_SUPER_12 | CODE_SUPER_13 | CODE_SUPER_14 | CODE_SUPER_15 | CODE_SUPER_16:
+				{
+					var numArgs = bytecode.get(i - 1) - CODE_SUPER_0;
+					var symbol = READ_SHORT();
+					var superclass = READ_SHORT();
+					printf('SUPER_${numArgs} $symbol \'${methodNames.data[symbol].value.join("")}\' ${superclass}');
+				}
+			case CODE_RETURN:
+				printf("RETURN\n");
+			case CODE_END_MODULE:
+				printf("END_MODULE\n");
+			case CODE_END:
+				printf("END\n");
+			case CODE_JUMP_IF:
+				{
+					var offset = READ_SHORT();
+					printf('JUMP_IF $offset to ${i + offset}');
+				}
+			case CODE_JUMP:
+				{
+					var offset = READ_SHORT();
+					printf('JUMP $offset to ${i + offset}');
+				}
+			case CODE_LOOP:
+				{
+					var offset = READ_SHORT();
+					printf('LOOP $offset to ${i - offset}');
+				}
+			case CODE_AND:
+				{
+					var offset = READ_SHORT();
+					printf('AND $offset to ${i + offset}');
+				}
+			case CODE_OR:
+				{
+					var offset = READ_SHORT();
+					printf('OR $offset to ${i + offset}');
+				}
+			case CODE_CLOSE_UPVALUE:
+				printf("CLOSE_UPVALUE\n");
+			case CODE_CLOSURE:
+				{
+					var constant = READ_SHORT();
+					printf('CLOSURE $constant');
+
+					printf(fn.constants.data[constant].dump());
+					printf(" ");
+					var loadedFn = fn.constants.data[constant].AS_FUN();
+					for (j in 0...loadedFn.numUpvalues) {
+						var isLocal = READ_BYTE();
+						var index = READ_BYTE();
+						if (j > 0)
+							printf(", ");
+						printf('${isLocal != 0 ? "local" : "upvalue"} $index');
+					}
+					printf("\n");
+				}
+			case CODE_CONSTRUCT:
+				printf("CONSTRUCT\n");
+			case CODE_FOREIGN_CONSTRUCT:
+				printf("FOREIGN_CONSTRUCT\n");
+			case CODE_CLASS:
+				{
+					var numFields = READ_BYTE();
+					printf('CLASS $numFields fields\n');
+				}
+			case CODE_FOREIGN_CLASS:
+				{
+					printf("FOREIGN_CLASS\n");
+				}
+			case CODE_METHOD_INSTANCE:
+				{
+					var symbol = READ_SHORT();
+					printf('METHOD_INSTANCE $symbol \'${methodNames.data[symbol].value.join("")}\' \n');
+				}
+
+			case CODE_METHOD_STATIC:
+				{
+					var symbol = READ_SHORT();
+					printf('METHOD_STATIC $symbol \'${methodNames.data[symbol].value.join("")}\' \n');
+				}
+			case CODE_IMPORT_MODULE:
+				{
+					var name = READ_SHORT();
+					printf('IMPORT_MODULE $name \'');
+					printf(fn.constants.data[name].dump());
+					printf("'\n");
+				}
+
+			case CODE_IMPORT_VARIABLE:
+				{
+					var variable = READ_SHORT();
+					printf('IMPORT_VARIABLE $variable \'');
+					printf(fn.constants.data[variable].dump());
+					printf("'\n");
+				}
+			case _:
+				{
+					printf('UKNOWN! [${bytecode.get(i - 1)}]\n');
+				}
+		}
+		#if (sys || nodejs)
+		Sys.println('${buf.toString()}');
+		#else
+		trace('\n${buf.toString()}\n');
+		#end
+
+		if (code == CODE_END)
+			return -1;
+		return i - start;
 	}
 
 	public function reallocate(memory:Dynamic, oldSize:Int, newSize:Int) {}
@@ -388,7 +637,7 @@ class VM {
 		if (this.grayCount >= this.grayCapacity) {
 			this.grayCapacity = this.grayCount * 2;
 			#if cpp
-			this.gray = this.config.reallocateFn(this, this.gray, this.grayCapacity * cpp.sizeof(Obj));
+			this.gray = cast this.config.reallocateFn(this, this.gray, this.grayCapacity * cpp.Stdlib.sizeof(Obj));
 			#else
 			this.gray = cast this.config.reallocateFn(this, this.gray, this.grayCapacity * 256);
 			#end
@@ -425,8 +674,8 @@ class VM {
 		grayObj(classObj.name);
 		// Keep track of how much memory is still in use.
 		#if cpp
-		this.bytesAllocated += cpp.sizeof(ObjClass);
-		this.bytesAllocated += classObj.methods.capacity * cpp.sizeof(Method);
+		this.bytesAllocated += cpp.Stdlib.sizeof(ObjClass);
+		this.bytesAllocated += classObj.methods.capacity * cpp.Stdlib.sizeof(Method);
 		#else
 		this.bytesAllocated += 256;
 		this.bytesAllocated += classObj.methods.capacity * 256;
@@ -442,8 +691,8 @@ class VM {
 
 		// Keep track of how much memory is still in use.
 		#if cpp
-		this.bytesAllocated += cpp.sizeof(ObjClosure);
-		this.bytesAllocated += cpp.sizeof(ObjUpvalue) * closure.numUpvalues;
+		this.bytesAllocated += cpp.Stdlib.sizeof(ObjClosure);
+		this.bytesAllocated += cpp.Stdlib.sizeof(ObjUpvalue) * closure.numUpvalues;
 		#else
 		this.bytesAllocated += 256;
 		this.bytesAllocated += closure.numUpvalues * 256;
@@ -473,9 +722,9 @@ class VM {
 
 		// Keep track of how much memory is still in use.
 		#if cpp
-		this.bytesAllocated += cpp.sizeof(ObjFiber);
-		this.bytesAllocated += cpp.sizeof(ObjFiber) * fiber.frameCapacity;
-		this.bytesAllocated += cpp.sizeof(Value) * fiber.stackCapacity;
+		this.bytesAllocated += cpp.Stdlib.sizeof(ObjFiber);
+		this.bytesAllocated += cpp.Stdlib.sizeof(ObjFiber) * fiber.frameCapacity;
+		this.bytesAllocated += cpp.Stdlib.sizeof(Value) * fiber.stackCapacity;
 		#else
 		this.bytesAllocated += 256;
 		this.bytesAllocated += 256 * fiber.frameCapacity;
@@ -916,7 +1165,7 @@ class VM {
 			if (fn.module.name == null)
 				continue;
 			// -1 because IP has advanced past the instruction that it just executed.
-			var dataPointer:Pointer<Int> = new Pointer(fn.code.data);
+			var dataPointer:DataPointer = new DataPointer(fn.code.data);
 			var line = fn.debug.sourceLines.data[frame.ip.sub(dataPointer.pointer(-1))];
 			config.errorFn(this, WREN_ERROR_RUNTIME, fn.module.name.value.join(""), line, fn.debug.name);
 			i--;
@@ -1136,10 +1385,15 @@ class VM {
 			return WREN_RESULT_COMPILE_ERROR;
 		pushRoot(cast closure);
 		var fiber = new ObjFiber(this, closure);
+
 		popRoot(); // closure.
 
 		this.apiStack = null;
+		#if WREN_INTERPRET
 		return runInterpreter(fiber);
+		#else
+		return WREN_RESULT_SUCCESS;
+		#end
 	}
 
 	public function runInterpreter(fiber:ObjFiber):WrenInterpretResult {
@@ -1151,7 +1405,7 @@ class VM {
 		var frame:ObjClosure.CallFrame = null;
 
 		var stackStart:ValuePointer = null;
-		var ip:Pointer<Int> = null;
+		var ip:DataPointer = null;
 		var fn:ObjFn = null;
 
 		function PUSH(value:Value) {
@@ -1534,7 +1788,7 @@ class VM {
 						PUSH(closure.OBJ_VAL());
 						// Capture upvalues, if any.
 						for (i in 0...func.numUpvalues) {
-							var isLocal = READ_BYTE();
+							var isLocal:Null<Int> = READ_BYTE();
 							var index = READ_BYTE();
 							if (isLocal != null) {
 								// Make an new upvalue to close over the parent's local variable.

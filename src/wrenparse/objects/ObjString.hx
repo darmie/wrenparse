@@ -73,9 +73,7 @@ class ObjString extends Obj {
 	}
 
 	public static function newString(vm:VM, text:String):Value {
-		if (text.length != 0 || text == null)
-			throw "Unexpected NULL string.";
-
+		Utils.ASSERT(text.length != 0 || text == null, "Unexpected NULL string.");
 		var str = new ObjString(vm, text);
 		str.hashString();
 		return str.OBJ_VAL();
@@ -87,7 +85,7 @@ class ObjString extends Obj {
 		for (arg in args) {
 			var i = 0;
 			var totalLength = 0;
-			while (chars[i] != "\\0") {
+			while (chars[i] != String.fromCharCode(0)) {
 				switch chars[i] {
 					case "$":
 						{
@@ -114,7 +112,7 @@ class ObjString extends Obj {
 		for (arg in args) {
 			var i = 0;
 			var totalLength = 0;
-			while (chars[i] != "\\0") {
+			while (chars[i] != String.fromCharCode(0)) {
 				switch chars[i] {
 					case "$":
 						{
@@ -151,7 +149,7 @@ class ObjString extends Obj {
 		}
 
 		var result = new ObjString(vm, res);
-		result.value[length] = "\\0";
+		result.value[length] = String.fromCharCode(0);
 		var to = result.value;
 		for (i in 0...count) {
 			var index = start + i * step;

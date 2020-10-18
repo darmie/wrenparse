@@ -32,7 +32,7 @@ class ValuePointer {
 	}
 
 	public inline function setValue(index: Int, value: Value): Void {
-		arr.set(this.index + index, value);
+		arr.insert(this.index + index, value);
 	}
 
 	public inline function resize(size:Int) {
@@ -99,6 +99,7 @@ class Value {
 
 	public function new(type:ValueType) {
 		this.type = type;
+		this.as = {};
 	}
 
 	public inline function AS_OBJ() {
@@ -222,7 +223,7 @@ class Value {
 		return IS_OBJ() && AS_OBJ().type == OBJ_MAP;
 	}
 
-	public static inline function NUM_VAL(i:Int) {
+	public static inline function NUM_VAL(i:Float) {
 		final v = new Value(VAL_NUM);
 		v.as.num = i;
 		return v;
@@ -309,5 +310,16 @@ class Value {
 
 	public function isBool() {
 		return this.IS_FALSE() || this.IS_TRUE();
+	}
+
+	public function dump() {
+		return switch (type) {
+			case VAL_FALSE: return "false";
+			case VAL_NULL: return "null";
+			case VAL_NUM: return '${this.AS_NUM()}';
+			case VAL_TRUE: return "true";
+			case VAL_OBJ: return this.AS_OBJ().dump();
+			case VAL_UNDEFINED: return "<unreachable>";
+		}
 	}
 }

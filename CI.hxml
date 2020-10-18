@@ -9,7 +9,10 @@
 -lib polygonal-ds
 
 --dce  full
--D no-debug
+
+-D WREN_DEBUG_DUMP_COMPILED_CODE
+-D WREN_COMPILE
+-D debug
 
 
 --interp

@@ -227,7 +227,7 @@ enum ExprDef {
 	/**
 		Field access on `e.field`.
 	**/
-	EField(e:Expr, field:String);
+	EField(e:Expr, field:String, isSuper:Bool);
 
 	/**
 		Parentheses `(e)`.
@@ -247,7 +247,7 @@ enum ExprDef {
 	/**
 		A call `e(params)`.
 	**/
-	ECall(e:Expr, params:Array<Expr>);
+	ECall(e:Expr, params:Array<Expr>, isSuper:Bool);
 
 	/**
 		A constructor call `new t(params)`.

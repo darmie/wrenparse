@@ -38,10 +38,8 @@ class Utils {
 	}
 
 	public static function ASSERT(condition:Bool, message:String) {
-		#if debug
 		if (!condition)
 			throw message;
-		#end
 	}
 
 	public static function UNREACHABLE() {

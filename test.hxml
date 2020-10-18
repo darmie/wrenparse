@@ -5,14 +5,16 @@
 -main Test
 
 
+--dce full
+
 -lib hxparse
 -lib polygonal-ds
 -D WREN_DEBUG_DUMP_COMPILED_CODE
 -D WREN_COMPILE
-
---dce  full
+-D debug
 
 --interp
+
 
 
 

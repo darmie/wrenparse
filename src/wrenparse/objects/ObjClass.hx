@@ -136,27 +136,27 @@ class ObjClass extends Obj {
 	public function bindMethodCode(fn:ObjFn) {
 		var ip = 0;
 		while (true) {
-			var instruction:Code = fn.code.data[ip];
+			var instruction:Code = fn.code.data.get(ip);
 			switch instruction {
 				case CODE_LOAD_FIELD | CODE_STORE_FIELD | CODE_LOAD_FIELD_THIS | CODE_STORE_FIELD_THIS:
 					{
 						// Shift this class's fields down past the inherited ones. We don't
 						// check for overflow here because we'll see if the number of fields
 						// overflows when the subclass is created.
-						fn.code.data[ip + 1] += this.superClass.numFields;
+						fn.code.data.set(ip + 1, ++this.superClass.numFields);
 					}
 				case CODE_SUPER_0 | CODE_SUPER_1 | CODE_SUPER_2 | CODE_SUPER_3 | CODE_SUPER_4 | CODE_SUPER_5 | CODE_SUPER_6 | CODE_SUPER_7 | CODE_SUPER_8 |
 					CODE_SUPER_9 | CODE_SUPER_10 | CODE_SUPER_11 | CODE_SUPER_12 | CODE_SUPER_13 | CODE_SUPER_14 | CODE_SUPER_15 | CODE_SUPER_16:
 					{
 						// Fill in the constant slot with a reference to the superclass.
-						var constant = (fn.code.data[ip + 3] << 8) | fn.code.data[ip + 4];
+						var constant = (fn.code.data.get(ip + 3) << 8) | fn.code.data.get(ip + 4);
 						fn.constants.data[constant] = this.superClass.OBJ_VAL();
 					}
 				case CODE_CLOSURE:
 					{
 						// Bind the nested closure too.
 
-						var constant = (fn.code.data[ip + 1] << 8) | fn.code.data[ip + 2];
+						var constant = (fn.code.data.get(ip + 1) << 8) | fn.code.data.get(ip + 2);
 						bindMethodCode(fn.constants.data[constant].AS_FUN());
 						break;
 					}

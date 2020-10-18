@@ -1,5 +1,6 @@
 package wrenparse.objects;
 
+import wrenparse.Pointer.DataPointer;
 import wrenparse.Value.ValuePointer;
 import wrenparse.Utils.FixedArray;
 import wrenparse.VM;
@@ -24,7 +25,11 @@ class ObjClosure extends ObjFn {
     }
 
     public static function fromFn(vm:VM, fn:ObjFn){
-        var closure:ObjClosure = cast fn;
+        var closure:ObjClosure = new ObjClosure(vm, fn.module, fn.maxSlots);
+        closure.constants = fn.constants;
+        closure.code = fn.code;
+        closure.debug = fn.debug;
+        closure.arity = fn.arity;
 
         // ObjClosure* closure = ALLOCATE_FLEX(vm, ObjClosure,
         //     ObjUpvalue*, fn->numUpvalues);
@@ -34,7 +39,7 @@ class ObjClosure extends ObjFn {
 
         // // Clear the upvalue array. We need to do this in case a GC is triggered
         // // after the closure is created but before the upvalue array is populated.
-        // for (int i = 0; i < fn->numUpvalues; i++) closure->upvalues[i] = NULL;
+        for (i in 0...fn.numUpvalues) closure.upValues.remove(closure.upValues[i]);
 
         return closure;
     }
@@ -46,7 +51,7 @@ class CallFrame {
      * Instruction Pointer to the current (really next-to-be-executed) instruction in the
      * function's bytecode.
      */
-    public var ip:Pointer<Int>;
+    public var ip:DataPointer;
 
     /**
      * The closure being executed.

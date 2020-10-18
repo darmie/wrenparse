@@ -1,5 +1,7 @@
 package wrenparse;
 
+
+import polygonal.ds.tools.mem.ByteMemory;
 import haxe.io.UInt8Array;
 import byte.ByteData;
 import wrenparse.VM;
@@ -46,6 +48,7 @@ abstract Buffer<T>(TBuffer<T>) from TBuffer<T> to TBuffer<T> {
         var i = 0;
         while(i < count){
             this.data[this.count++] = data;
+            i++;
         }
     }
 
@@ -95,53 +98,51 @@ abstract SymbolTable(StringBuffer) from StringBuffer to StringBuffer {
 
 
 typedef IntBuffer = Buffer<Int>;
-typedef ByteBuffer = Buffer<Int>;
+// typedef ByteBuffer = Buffer<Int>;
 
-// typedef TBBuffer = {
-//     data:BytesBuffer,
-//     count:Int,
-//     capacity:Int,
-//     vm:VM
-// }
+typedef TBBuffer = {
+    data:ByteMemory,
+    count:Int,
+    capacity:Int,
+    vm:VM
+}
 
-// @:forward(data, count, capacity, vm)
-// abstract ByteBuffer(TBBuffer) from TBBuffer to TBBuffer {
-//     public inline function new(vm:VM) {
-//         this = {
-//             data: new BytesBuffer(),
-//             count: 0,
-//             capacity: 0,
-//             vm:vm
-//         };
-//     }
+@:forward(data, count, capacity, vm)
+abstract ByteBuffer(TBBuffer) from TBBuffer to TBBuffer {
+    public inline function new(vm:VM) {
+        this = {
+            data: new ByteMemory(256),
+            count: 0,
+            capacity: 0,
+            vm:vm
+        };
+    }
 
-//     public inline function clear(){
-//         // todo: vm.reallocate()
-//         this = {
-//             data: new BytesBuffer(),
-//             count: 0,
-//             capacity: 0,
-//             vm:this.vm
-//         };
-//     }
+    public inline function clear(){
+        // todo: vm.reallocate()
+        this = {
+            data: new ByteMemory(256),
+            count: 0,
+            capacity: 0,
+            vm:this.vm
+        };
+    }
 
-//     public inline function fill(data:Int, count:Int) {
-//         if(this.capacity < this.count + count){
-//             var capacity = wrenPowerOf2Ceil(this.count + count);
-//             // todo: VM reallocate  
-//             this.capacity = capacity;
-//         }
+    public inline function fill(data:Int, count:Int) {
+        if(this.capacity < this.count + count){
+            var capacity = wrenPowerOf2Ceil(this.count + count);
+            // todo: VM reallocate  
+            this.capacity = capacity;
+        }
 
-//         var i = 0;
-//         while(i < count){
-//            // this.data[this.count++] = data;
-//            var b = new BytesBuffer();
-//            b.addByte(data);
-//            this.data.addBytes(b.getBytes(), this.count++, b.length);
-//         }
-//     }
+        var i = 0;
+        while(i < count){
+           this.data.set(this.count++, data);
+           i++;
+        }
+    }
 
-//     public inline function write(data:Int) {
-//         fill(data, 1);
-//     }
-// }
+    public inline function write(data:Int) {
+        fill(data, 1);
+    }
+}

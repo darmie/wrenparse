@@ -1,5 +1,8 @@
 package wrenparse;
 
+import polygonal.ds.tools.mem.ByteMemory;
+import haxe.io.UInt8Array;
+import haxe.io.UInt16Array;
 import haxe.io.Bytes;
 import byte.ByteData;
 import wrenparse.Data.Token;
@@ -9,20 +12,21 @@ import wrenparse.Utils.FixedArray;
 import wrenparse.IO.IntBuffer;
 import wrenparse.IO.SymbolTable;
 import wrenparse.Data.StatementDef;
+
 using StringTools;
 
 typedef Local = {
 	// The name of the local variable. This points directly into the original
 	// source code string.
-	name:String,
+	?name:String,
 	// The length of the local variable's name.
-	length:Int,
+	?length:Int,
 	// The depth in the scope chain that this variable was declared at. Zero is
 	// the outermost scope--parameters for a method, or the first local block in
 	// top level code. One is the scope within that, etc.
-	depth:Int,
+	?depth:Int,
 	// If this local variable is being used as an upvalue.
-	isUpvalue:Bool
+	?isUpvalue:Bool
 }
 
 typedef CompilerUpvalue = {
@@ -38,17 +42,17 @@ typedef CompilerUpvalue = {
  */
 typedef Loop = {
 	// Index of the instruction that the loop should jump back to.
-	start:Int,
+	?start:Int,
 	// Index of the argument for the CODE_JUMP_IF instruction used to exit the
 	// loop. Stored so we can patch it once we know where the loop ends.
-	exitJump:Int,
+	?exitJump:Int,
 	// Index of the first instruction of the body of the loop.
-	body:Int,
+	?body:Int,
 	// Depth of the scope(s) that need to be exited if a break is hit inside the
 	// loop.
-	scopDepth:Int,
+	?scopeDepth:Int,
 	// The loop enclosing this one, or NULL if this is the outermost loop.
-	enclosing:Null<Loop>,
+	?enclosing:Null<Loop>,
 }
 
 /**
@@ -73,12 +77,94 @@ enum SignatureType {
 	SIG_INITIALIZER;
 }
 
-typedef Signature = {
-	type:SignatureType,
-	length:Int,
-	name:String,
-	arity:Int
+typedef TSignature = {
+	?type:SignatureType,
+	?length:Int,
+	?name:String,
+	?arity:Int
 }
+
+@:forward(type, length, name, arity)
+abstract Signature(TSignature) from TSignature to TSignature {
+	inline function new(sig:TSignature) {
+		this = sig;
+	}
+
+	inline function parameterList(name:String, numParams:Int, leftBracket:String, rightBracket:String) {
+		var i = 0;
+		name += leftBracket;
+		while (i < numParams && i < Compiler.MAX_PARAMETERS) {
+			if (i > 0)
+				name += ",";
+			name += "_";
+			i++;
+		}
+		name += rightBracket;
+	}
+
+	public inline function toString():String {
+		var name = this.name;
+		switch this.type {
+			case SIG_METHOD:
+				parameterList(name, this.arity, "(", ")");
+			case SIG_GETTER:
+				{}
+			case SIG_SETTER:
+				{
+					name += "=";
+					parameterList(name, this.arity, "(", ")");
+				}
+			case SIG_SUBSCRIPT:
+				parameterList(name, this.arity, "[", "]");
+			case SIG_SUBSCRIPT_SETTER:
+				{
+					parameterList(name, this.arity - 1, "[", "]");
+					name += "=";
+					parameterList(name, this.arity, "(", ")");
+				}
+			case SIG_INITIALIZER:
+				{
+					name = 'init $name';
+					parameterList(name, this.arity, "(", ")");
+				}
+		}
+		name += String.fromCharCode(0);
+		return name;
+	}
+}
+
+typedef GrammarFn = (compiler:Compiler, canAssign:Bool) -> Void;
+typedef SignatureFn = (compiler:Compiler, signature:Signature) -> Void;
+
+enum Precedence {
+	PREC_NONE;
+	PREC_LOWEST;
+	PREC_ASSIGNMENT; // =
+	PREC_CONDITIONAL; // ?:
+	PREC_LOGICAL_OR; // ||
+	PREC_LOGICAL_AND; // &&
+	PREC_EQUALITY; // == !=
+	PREC_IS; // is
+	PREC_COMPARISON; // < > <= >=
+	PREC_BITWISE_OR; // |
+	PREC_BITWISE_XOR; // ^
+	PREC_BITWISE_AND; // &
+	PREC_BITWISE_SHIFT; // << >>
+	PREC_RANGE; // .. ...
+	PREC_TERM; // + -
+	PREC_FACTOR; // * / %
+	PREC_UNARY; // unary - ! ~
+	PREC_CALL; // . () []
+	PREC_PRIMARY;
+}
+
+typedef GrammarRule = {
+	?prefix:GrammarFn,
+	?infix:GrammarFn,
+	?method:SignatureFn,
+	?precedence:Precedence,
+	?name:String
+};
 
 /**
  * Bookkeeping information for compiling a class definition.
@@ -431,12 +517,11 @@ class Compiler {
 	 */
 	public static final MAX_INTERPOLATION_NESTING = 8;
 
-
 	public static final GROW_FACTOR:Int = 2;
 
-	public static final  MAP_LOAD_PERCENT= 75;
+	public static final MAP_LOAD_PERCENT = 75;
 
-	public static final MIN_CAPACITY=16;
+	public static final MIN_CAPACITY = 16;
 
 	/**
 	 * The compiler for the function enclosing this one, or NULL if it's the
@@ -447,7 +532,7 @@ class Compiler {
 	/**
 	 * The currently in scope local variables.
 	 */
-	public var locals:FixedArray<Local> = new FixedArray(MAX_LOCALS);
+	public var locals:Array<Local>;
 
 	/**
 	 * The number of local variables currently in scope.
@@ -498,16 +583,23 @@ class Compiler {
 
 	public var constants:ObjMap;
 
-	public function error(msg:String) {
+	// public static inline function UNUSED():GrammarRule return {precedence:PREC_NONE};
+	// public static inline function PREFIX(prefixFn:GrammarFn):GrammarRule return { prefix: prefixFn, precedence:PREC_NONE};
+	// public static inline function INFIX(prec:Precedence, infixFn:GrammarFn):GrammarRule return { infix: infixFn, precedence:prec};
+	// public static inline function INFIX_OPERATOR(prec:Precedence, name:String):GrammarRule return { infix: infixOp, signature: precedence:prec};
+
+	public function error(msg:String = "") {
 		var token = this.parser.last;
 		this.parser.errors.push(SError(msg, token.pos, WrenLexer.lineCount - 1));
 
 		var buf = new StringBuf();
+		buf.add(msg);
 		for (x in this.parser.errors) {
 			switch x {
 				case SError(msg, _, line):
 					buf.add('[Line: ${line}] ${msg} \n');
-				case _: continue;
+				case _:
+					continue;
 			}
 		}
 
@@ -515,9 +607,7 @@ class Compiler {
 		var moduleName = module != null ? module.value.join("") : "<unknown>";
 
 		var message = buf.toString();
-
-		this.parser.vm.config.errorFn(this.parser.vm, WREN_ERROR_COMPILE,
-			moduleName, WrenLexer.lineCount - 1, message);
+		this.parser.vm.config.errorFn(this.parser.vm, WREN_ERROR_COMPILE, moduleName, WrenLexer.lineCount - 1, message);
 	}
 
 	/**
@@ -525,14 +615,14 @@ class Compiler {
 	 * @param constant
 	 * @return Int
 	 */
-	public function addConstant(vm:VM, constant:Value):Int {
+	public function addConstant(constant:Value):Int {
 		if (this.parser.errors.length >= 1) {
 			return -1;
 		}
-
+		
 		// See if we already have a constant for the value. If so, reuse it.
 		if (this.constants != null) {
-			var exisiting:Value = constants.get(vm, constant);
+			var exisiting:Value = constants.get(this.parser.vm, constant);
 			if (exisiting.IS_NUM())
 				return FPHelper.floatToI32(exisiting.as.num);
 		}
@@ -542,12 +632,11 @@ class Compiler {
 			if (constant.IS_OBJ())
 				this.parser.vm.pushRoot(constant.as.obj);
 			fn.constants.write(constant);
-
 			if (this.constants == null) {
 				this.constants = new ObjMap(this.parser.vm);
 			}
 
-			this.constants.set(vm, constant, Value.NUM_VAL(fn.constants.count - 1));
+			this.constants.set(this.parser.vm, constant, Value.NUM_VAL(fn.constants.count - 1));
 		} else {
 			error('A function may only contain ${MAX_CONSTANTS} unique constants.');
 		}
@@ -581,7 +670,9 @@ class Compiler {
 
 		compiler.numLocals = 1;
 		compiler.numSlots = compiler.numLocals;
-
+		
+		compiler.locals = [];
+		compiler.locals[0] = {};
 		if (isMethod) {
 			compiler.locals[0].name = "this";
 			compiler.locals[0].length = 4;
@@ -589,7 +680,7 @@ class Compiler {
 			compiler.locals[0].name = null;
 			compiler.locals[0].length = 0;
 		}
-
+		
 		compiler.locals[0].depth = -1;
 		compiler.locals[0].isUpvalue = false;
 
@@ -612,7 +703,6 @@ class Compiler {
 	 */
 	public function emitByte(byte:Int) {
 		fn.code.write(byte);
-
 		// Assume the instruction is associated with the most recently consumed token.
 		fn.debug.sourceLines.write(WrenLexer.lineCount - 1);
 
@@ -636,8 +726,12 @@ class Compiler {
 	 * @param arg
 	 */
 	public function emitShort(arg:Int) {
-		emitByte((arg >> 8) & 0xff);
-		emitByte(arg & 0xff);
+		var off = (arg >> 8) & 0xff;
+		var val = arg & 0xff;
+
+		
+		emitByte(off);
+		emitByte(val);
 	}
 
 	/**
@@ -646,7 +740,7 @@ class Compiler {
 	 * @param instr
 	 * @param arg
 	 */
-	public function emitByteArg(instr:Code, arg:Int) {
+	public function emitByteArg(instr:Code, arg:Int):Int {
 		emitOp(instr);
 		return emitByte(arg);
 	}
@@ -659,7 +753,7 @@ class Compiler {
 	 */
 	public function emitShortArg(instr:Code, arg:Int) {
 		emitOp(instr);
-		return emitShort(arg);
+		emitShort(arg);
 	}
 
 	/**
@@ -680,7 +774,7 @@ class Compiler {
 	 * @param value
 	 */
 	public function emitConstant(value:Value) {
-		final constant = addConstant(this.parser.vm, value);
+		final constant = addConstant(value);
 		// Compile the code to load the constant.
 		emitShortArg(CODE_CONSTANT, constant);
 	}
@@ -705,10 +799,10 @@ class Compiler {
 	 * If [token] is `NULL`, uses the previously consumed token. Returns its symbol.
 	 * @param token
 	 */
-	public function declareVariable(?token:Token) {
-		if (token == null)
-			token = this.parser.last;
-		var length = token.pos.max - token.pos.min;
+	public function declareVariable(?tokenName:String) {
+		if (tokenName == null)
+			tokenName = this.parser.last.toString();
+		var length = tokenName.length;
 		if (length > MAX_VARIABLE_NAME) {
 			error('Variable name cannot be longer than ${MAX_VARIABLE_NAME} characters.');
 		}
@@ -716,14 +810,14 @@ class Compiler {
 		// Top-level module scope.
 		if (this.scopeDepth == -1) {
 			var line = -1;
-			var symbol = this.parser.module.defineVariable(this.parser.vm, token.toString(), token.toString().length, Value.NULL_VAL(), line);
+			var symbol = this.parser.module.defineVariable(this.parser.vm, tokenName, length, Value.NULL_VAL(), line);
 
 			if (symbol == -1) {
 				error("Module variable is already defined.");
 			} else if (symbol == -2) {
 				error("Too many module variables defined.");
 			} else if (symbol == -3) {
-				error('Variable \'${token.toString()}\' referenced before this definition (first use at line $line).');
+				error('Variable \'${tokenName}\' referenced before this definition (first use at line $line).');
 			}
 
 			return symbol;
@@ -738,7 +832,7 @@ class Compiler {
 			// Once we escape this scope and hit an outer one, we can stop.
 			if (local.depth < this.scopeDepth)
 				break;
-			if (local.length == length && local.name == token.toString()) {
+			if (local.length == length && local.name == tokenName) {
 				error("Variable is already declared in this scope.");
 				return i;
 			}
@@ -751,11 +845,54 @@ class Compiler {
 			return -1;
 		}
 
-		return addLocal(token.toString());
+		return addLocal(tokenName);
 	}
 
 	public function declareNamedVariable() {
 		return declareVariable();
+	}
+
+	/**
+	 * Declares a method in the enclosing class with [signature].
+	 *
+	 * Reports an error if a method with that signature is already declared.
+	 * Returns the symbol for the method.
+	 * @param signature
+	 * @param name
+	 */
+	public function declareMethod(signature:Signature, name:String) {
+		var symbol = signatureSymbol(signature);
+
+		// See if the class has already declared method with this signature.
+		var classInfo = this.enclosingClass;
+		var methods = classInfo.inStatic ? classInfo.staticMethods : classInfo.methods;
+		for (i in 0...methods.count) {
+			if (methods.data[i] == symbol) {
+				var staticPrefix = classInfo.inStatic ? "static " : "";
+				error('Class ${classInfo.name.value.join("")} already defines a ${staticPrefix}method \'${name}\'.');
+			}
+		}
+		methods.write(symbol);
+		return symbol;
+	}
+
+	public function defineMethod(classVariable:Variable, isStatic:Bool, symbol:Int) {}
+
+	/**
+	 * Gets the symbol for a method with [signature].
+	 * @param signature
+	 */
+	public function signatureSymbol(signature:Signature) {
+		var name = signature.toString();
+		return methodSymbol(name);
+	}
+
+	/**
+	 * Gets the symbol for a method [name] with [length].
+	 * @param name
+	 */
+	public function methodSymbol(name:String) {
+		return this.parser.vm.methodNames.ensure(name);
 	}
 
 	/**
@@ -790,7 +927,7 @@ class Compiler {
 	 */
 	public function discardLocals(depth:Int) {
 		if (!(scopeDepth > -1)) {
-			throw "Cannot exit top-level scope.";
+			error("Cannot exit top-level scope.");
 		}
 
 		var local = this.numLocals - 1;
@@ -957,7 +1094,30 @@ class Compiler {
 		emitByteArg(CODE_LOAD_LOCAL, slot);
 	}
 
-	public function endCompiler(vm:VM, debugName:String) {
+	/**
+	 * Emits the code to load [variable] onto the stack.
+	 * @param variable
+	 */
+	public function loadVariable(variable:Variable) {
+		switch (variable.scope) {
+			case SCOPE_LOCAL:
+				loadLocal(variable.index);
+			case SCOPE_UPVALUE:
+				emitByteArg(CODE_LOAD_UPVALUE, variable.index);
+			case SCOPE_MODULE:
+				emitShortArg(CODE_LOAD_MODULE_VAR, variable.index);
+		}
+	}
+
+	/**
+	 * Loads the receiver of the currently enclosing method. Correctly handles
+	 * functions defined inside methods.
+	 */
+	public function loadThis() {
+		loadVariable(resolveNonmodule("this"));
+	}
+
+	public function endCompiler(debugName:String) {
 		if (this.parser.errors.length >= 1) {
 			this.parser.vm.compiler = this.parent;
 			return null;
@@ -971,7 +1131,7 @@ class Compiler {
 
 		// In the function that contains this one, load the resulting function object.
 		if (this.parent != null) {
-			var constant = this.parent.addConstant(vm, this.fn.OBJ_VAL());
+			var constant = this.parent.addConstant(this.fn.OBJ_VAL());
 
 			// Wrap the function in a closure. We do this even if it has no upvalues so
 			// that the VM can uniformly assume all called objects are closures. This
@@ -988,14 +1148,14 @@ class Compiler {
 			}
 		}
 		// Pop this compiler off the stack.
-		this.parser.vm.compiler =this.parent;
+		this.parser.vm.compiler = this.parent;
 
+		
 		#if WREN_DEBUG_DUMP_COMPILED_CODE
 		this.parser.vm.dumpCode(this.fn);
 		#end
-		
-		return this.fn;
 
+		return this.fn;
 	}
 
 	/**
@@ -1005,23 +1165,24 @@ class Compiler {
 	public function patchJump(offset:Int) {
 		// -2 to adjust for the bytecode for the jump offset itself.
 		var jump = fn.code.count - offset - 2;
-		if (jump > MAX_JUMP) error("Too much code to jump over.");
+		if (jump > MAX_JUMP)
+			error("Too much code to jump over.");
 
-	
-		this.fn.code.data[offset] =  (jump >> 8) & 0xff;
-		
- 		this.fn.code.data[offset + 1] = jump & 0xff;		
+		this.fn.code.data.set(offset,  (jump >> 8) & 0xff);
+
+		this.fn.code.data.set(offset + 1,  jump & 0xff);
 	}
 
-	public function loadCoreVariable(name:String){}
-
-
+	public function loadCoreVariable(name:String) {
+		var symbol = this.parser.module.variableNames.find(name);
+		Utils.ASSERT(symbol != -1, "Should have already defined core name.");
+		emitShortArg(CODE_LOAD_MODULE_VAR, symbol);
+	}
 
 	public static function compile(vm:VM, module:ObjModule, source:String, isExpression:Bool = false, printErrors:Bool = true):ObjFn {
-	
 		// Skip the UTF-8 BOM if there is one.
 		// "\xEF\xBB\xBF"
-		if(source.charCodeAt(0) == 239 && source.charCodeAt(1) == 187 && source.charCodeAt(2) == 191){
+		if (source.charCodeAt(0) == 239 && source.charCodeAt(1) == 187 && source.charCodeAt(2) == 191) {
 			source = source.substring(3);
 		}
 
@@ -1031,14 +1192,17 @@ class Compiler {
 		parser.source = source;
 
 		var compiler = init(parser, null, false);
-		// start parsing 
+		
+		// start parsing
 		parser.parse();
+		if(parser.errors.length > 0){
+			compiler.error();
+		}
 
 		compiler.emitOp(CODE_RETURN);
 
-		return compiler.endCompiler(vm, "(script)");
+		return compiler.endCompiler("(script)");
 	}
-
 
 	/**
 	 * Returns the number of arguments to the instruction at [ip] in [fn]'s
@@ -1048,8 +1212,8 @@ class Compiler {
 	 * @param ip
 	 * @return Int
 	 */
-	 public static function getByteCountForArguments(bytecode:Array<Int>, constants:Array<Value>, ip:Int):Int {
-		var instruction:Code = bytecode[ip];
+	public static function getByteCountForArguments(bytecode:ByteMemory, constants:Array<Value>, ip:Int):Int {
+		var instruction:Code = bytecode.get(ip);
 		return switch instruction {
 			case CODE_NULL | CODE_FALSE | CODE_TRUE | CODE_POP | CODE_CLOSE_UPVALUE | CODE_RETURN | CODE_END | CODE_LOAD_LOCAL_0 | CODE_LOAD_LOCAL_1 |
 				CODE_LOAD_LOCAL_2 | CODE_LOAD_LOCAL_3 | CODE_LOAD_LOCAL_4 | CODE_LOAD_LOCAL_5 | CODE_LOAD_LOCAL_6 | CODE_LOAD_LOCAL_7 | CODE_LOAD_LOCAL_8 |
@@ -1058,18 +1222,88 @@ class Compiler {
 			case CODE_LOAD_LOCAL | CODE_STORE_LOCAL | CODE_LOAD_UPVALUE | CODE_STORE_UPVALUE | CODE_LOAD_FIELD_THIS | CODE_STORE_FIELD_THIS |
 				CODE_LOAD_FIELD | CODE_STORE_FIELD | CODE_CLASS:
 				1;
-			case CODE_CONSTANT | CODE_LOAD_MODULE_VAR | CODE_STORE_MODULE_VAR | CODE_CALL_0 | CODE_CALL_1 | CODE_CALL_2 | CODE_CALL_3 | CODE_CALL_4 | CODE_CALL_5 | CODE_CALL_6 | CODE_CALL_7 | CODE_CALL_8 |
-				CODE_CALL_9 | CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 | CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16 | CODE_JUMP
-				| CODE_LOOP | CODE_JUMP_IF | CODE_AND | CODE_OR | CODE_METHOD_INSTANCE | CODE_METHOD_STATIC | CODE_IMPORT_MODULE | CODE_IMPORT_VARIABLE: 2;
+			case CODE_CONSTANT | CODE_LOAD_MODULE_VAR | CODE_STORE_MODULE_VAR | CODE_CALL_0 | CODE_CALL_1 | CODE_CALL_2 | CODE_CALL_3 | CODE_CALL_4 |
+				CODE_CALL_5 | CODE_CALL_6 | CODE_CALL_7 | CODE_CALL_8 | CODE_CALL_9 | CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 |
+				CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16 | CODE_JUMP | CODE_LOOP | CODE_JUMP_IF | CODE_AND | CODE_OR | CODE_METHOD_INSTANCE |
+				CODE_METHOD_STATIC | CODE_IMPORT_MODULE | CODE_IMPORT_VARIABLE: 2;
 			case CODE_SUPER_0 | CODE_SUPER_1 | CODE_SUPER_2 | CODE_SUPER_3 | CODE_SUPER_4 | CODE_SUPER_5 | CODE_SUPER_6 | CODE_SUPER_7 | CODE_SUPER_8 |
 				CODE_SUPER_9 | CODE_SUPER_10 | CODE_SUPER_11 | CODE_SUPER_12 | CODE_SUPER_13 | CODE_SUPER_14 | CODE_SUPER_15 | CODE_SUPER_16: 4;
-			case CODE_CLOSURE:{
-				var constant = (bytecode[ip + 1] << 8) | bytecode[ip + 2];
-				var loadedFn:ObjFn = constants[constant].AS_FUN();
-		  
-				// There are two bytes for the constant, then two for each upvalue.
-				return 2 + (loadedFn.numUpvalues * 2);
-			}
+			case CODE_CLOSURE: {
+					var constant = (bytecode.get(ip + 1) << 8) | bytecode.get(ip + 2);
+					var loadedFn:ObjFn = constants[constant].AS_FUN();
+
+					// There are two bytes for the constant, then two for each upvalue.
+					return 2 + (loadedFn.numUpvalues * 2);
+				}
 		}
 	}
+
+	public function signatureFromToken(name:String, type:SignatureType) {
+		var signature:Signature = {};
+		signature.name = name;
+		signature.length = signature.name.length;
+		signature.type = type;
+		signature.arity = 0;
+
+		if (signature.length > MAX_METHOD_NAME) {
+			error('Method names cannot be longer than $MAX_METHOD_NAME characters.');
+			signature.length = MAX_METHOD_NAME;
+		}
+
+		return signature;
+	}
+
+	public function validateNumParameters(numArgs:Int) {
+		if (numArgs == MAX_PARAMETERS + 1) {
+			// Only show an error at exactly max + 1 so that we can keep parsing the
+			// parameters and minimize cascaded errors.
+			error('Methods cannot have more than ${MAX_PARAMETERS} parameters.');
+		}
+	}
+
+	public function startLoop(loop:Loop) {
+		loop.enclosing = this.loop;
+		loop.start = this.fn.code.count - 1;
+		loop.scopeDepth = this.scopeDepth;
+		this.loop = loop;
+	}
+
+	/**
+	 * Ends the current innermost loop. Patches up all jumps and breaks now that
+	 * we know where the end of the loop is.
+	 * 
+	 */
+	public function endLoop() {
+		// We don't check for overflow here since the forward jump over the loop body
+		// will report an error for the same problem.
+		var loopOffset = this.fn.code.count - this.loop.start + 2;
+		emitShortArg(CODE_LOOP, loopOffset);
+		patchJump(this.loop.exitJump);
+		// Find any break placeholder instructions (which will be CODE_END in the
+		// bytecode) and replace them with real jumps.
+		var i = this.loop.body;
+		while (i < this.fn.code.count) {
+			if (this.fn.code.data.get(i) == CODE_END) {
+				this.fn.code.data.set(i, CODE_JUMP);
+				patchJump(i + 1);
+				i += 3;
+			} else {
+				// Skip this instruction and its arguments.
+				i += 1 + getByteCountForArguments(this.fn.code.data, this.fn.constants.data, i);
+			}
+		}
+		this.loop = this.loop.enclosing;
+	}
+
+	public function testExitLoop() {
+		this.loop.exitJump = emitJump(CODE_JUMP_IF);
+	}
+
+	public function loopBody() {
+		this.loop.body = this.fn.code.count;
+	}
+
+	public function namedCall(name:String, canAssign:Bool, code:Code) {}
+
+	public static function isLocalName(name:String):Bool {return Utils.isLocalName(name);}
 }
