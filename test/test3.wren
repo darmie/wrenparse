@@ -7,3 +7,5 @@ while(true){
         break
     }
 }
+
+var isSane = 1 != 2 ? "math is sane" : "math is not sane!"

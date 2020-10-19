@@ -785,11 +785,12 @@ class Compiler {
 	 * @param name
 	 */
 	public function addLocal(name:String) {
-		final local = this.locals[this.numLocals];
+		var local:Local = {};
 		local.name = name;
 		local.length = name.length;
 		local.depth = this.scopeDepth;
 		local.isUpvalue = false;
+		this.locals.push(local);
 		return this.numLocals++;
 	}
 
@@ -828,7 +829,6 @@ class Compiler {
 		var i = this.numLocals - 1;
 		while (i >= 0) {
 			var local = this.locals[i];
-
 			// Once we escape this scope and hit an outer one, we can stop.
 			if (local.depth < this.scopeDepth)
 				break;
@@ -836,7 +836,6 @@ class Compiler {
 				error("Variable is already declared in this scope.");
 				return i;
 			}
-
 			i--;
 		}
 

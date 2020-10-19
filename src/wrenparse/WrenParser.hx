@@ -73,7 +73,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 		return ret;
 	}
 
-	function parseStatements():Statement {
+	public function parseStatements():Statement {
 		return switch stream {
 			case [{tok: Eof}]: throw new hxparse.NoMatch<Dynamic>(curPos(), peek(0));
 			case [{tok: Line}]: parseStatements();
@@ -1069,16 +1069,24 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 		return switch stream {
 			case [{tok: BrOpen, pos: p}]:
 				{
+					#if WREN_COMPILE
+					this.vm.compiler.pushScope();
+					#end
 					if (isForeign) {
 						errors.push(SError('Error at \'{\': foreign field cannot have body ', p, WrenLexer.lineCount));
 						return null;
 					} else {
+						#if WREN_COMPILE
+						var code = parseRepeat(methodCompiler.parser.parseStatements);
+						#else 
 						var code = parseRepeat(parseStatements);
+						#end
 						switch stream {
 							case [{tok: BrClose}]: {
 									#if WREN_COMPILE
 									compileBody(methodCompiler, false, false);
 									methodCompiler.endCompiler(fullSignature);
+									this.vm.compiler.popScope();
 									#end
 								}
 							case [{tok: Eof}]:
@@ -1200,8 +1208,12 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 					#end
 					// Compile the then branch.
 					switch stream {
-						case [{tok: BrOpen, pos: p}, body = parseRepeat(parseStatements)]:
+						case [{tok: BrOpen, pos: p}]:
 							{
+								#if WREN_COMPILE
+								this.vm.compiler.pushScope();
+								#end
+								var body = parseRepeat(parseStatements);
 								while (true) {
 									switch stream {
 										case [{tok: BrClose}]: break;
@@ -1213,6 +1225,9 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 											break;
 									}
 								}
+								#if WREN_COMPILE
+								this.vm.compiler.popScope();
+								#end
 								// Compile the else branch if there is one.
 								switch stream {
 									case [{tok: Kwd(KwdElse), pos: p}]: {
@@ -1223,6 +1238,9 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 											#end
 											switch stream {
 												case [{tok: BrOpen}]: {
+														#if WREN_COMPILE
+														this.vm.compiler.pushScope();
+														#end
 														elseBody.concat(parseRepeat(parseStatements));
 														while (true) {
 															switch stream {
@@ -1235,9 +1253,13 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 																	break;
 															}
 														}
+														#if WREN_COMPILE
+														this.vm.compiler.popScope();
+														#end
 													}
 												case [exp = parseRepeat(parseStatements)]: elseBody.concat(parseRepeat(parseStatements));
 											}
+
 											#if WREN_COMPILE
 											// Patch the jump over the else.
 											this.vm.compiler.patchJump(elseJump);
@@ -1380,6 +1402,7 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 					}
 					#if WREN_COMPILE
 					this.vm.compiler.endLoop();
+					this.vm.compiler.popScope();
 					#end
 					return SWhile({expr: EWhile(exp, null, true), pos: p}, body);
 				}
@@ -1440,11 +1463,157 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 		return compiler == null ? null : compiler.enclosingClass;
 	}
 
+	function storeIdentity(s:String) {
+		#if WREN_COMPILE
+		var field = Compiler.MAX_FIELDS;
+		if (s.charAt(0) == "_") {
+			// If we're directly inside a method, use a more optimal instruction.
+			if (this.vm.compiler.parent != null && this.vm.compiler.parent.enclosingClass == getEnclosingClass(this.vm.compiler)) {
+				this.vm.compiler.emitByteArg(CODE_STORE_FIELD_THIS, field);
+			} else {
+				this.vm.compiler.loadThis();
+				this.vm.compiler.emitByteArg(CODE_STORE_FIELD, field);
+			}
+		} else if (s.charAt(0) == "_" && s.charAt(1) == "_") {
+			// It definitely exists now, so resolve it properly. This is different from
+			// the above resolveLocal() call because we may have already closed over it
+			// as an upvalue.
+			var tokenName = s;
+			var variable = this.vm.compiler.resolveName(tokenName);
+			// Emit the store instruction.
+			switch (variable.scope) {
+				case SCOPE_LOCAL:
+					this.vm.compiler.emitByteArg(CODE_STORE_LOCAL, variable.index);
+				case SCOPE_UPVALUE:
+					this.vm.compiler.emitByteArg(CODE_STORE_UPVALUE, variable.index);
+				case SCOPE_MODULE:
+					this.vm.compiler.emitShortArg(CODE_STORE_MODULE_VAR, variable.index);
+			}
+		} else {
+			// normal identity
+			var tokenName = s;
+			var variable = this.vm.compiler.resolveNonmodule(tokenName);
+			if (variable.index != -1) {
+				// bareName(compiler, canAssign, variable);
+				switch (variable.scope) {
+					case SCOPE_LOCAL:
+						this.vm.compiler.emitByteArg(CODE_STORE_LOCAL, variable.index);
+					case SCOPE_UPVALUE:
+						this.vm.compiler.emitByteArg(CODE_STORE_UPVALUE, variable.index);
+					case SCOPE_MODULE:
+						this.vm.compiler.emitShortArg(CODE_STORE_MODULE_VAR, variable.index);
+				}
+			} else {
+				// If we're inside a method and the name is lowercase, treat it as a method
+				// on this.
+				if (Compiler.isLocalName(tokenName) && getEnclosingClass(this.vm.compiler) != null) {
+					this.vm.compiler.loadThis();
+					// this.vm.compiler.namedCall(tokenName, false, CODE_CALL_0);
+					var signature = this.vm.compiler.signatureFromToken(tokenName, SIG_GETTER);
+
+					// Build the setter signature.
+					signature.type = SIG_SETTER;
+					signature.arity = 1;
+
+					callSignature(CODE_CALL_0, signature);
+				} else {
+					// Otherwise, look for a module-level variable with the name.
+					variable.scope = SCOPE_MODULE;
+					variable.index = this.module.variableNames.find(tokenName);
+					if (variable.index == -1) {
+						// Implicitly define a module-level variable in
+						// the hopes that we get a real definition later.
+						variable.index = this.module.declareVariable(this.vm, tokenName, WrenLexer.lineCount);
+
+						if (variable.index == -2) {
+							this.vm.compiler.error("Too many module variables defined.");
+						}
+					}
+
+					switch (variable.scope) {
+						case SCOPE_LOCAL:
+							this.vm.compiler.emitByteArg(CODE_STORE_LOCAL, variable.index);
+						case SCOPE_UPVALUE:
+							this.vm.compiler.emitByteArg(CODE_STORE_UPVALUE, variable.index);
+						case SCOPE_MODULE:
+							this.vm.compiler.emitShortArg(CODE_STORE_MODULE_VAR, variable.index);
+					}
+				}
+			}
+		}
+		#end
+	}
+
+	function loadIdentity(s:String) {
+		#if WREN_COMPILE
+		if (peek(0).toString() != "=") {
+			if (s.charAt(0) == "_") {
+				// If we're directly inside a method, use a more optimal instruction.
+				if (this.vm.compiler.parent != null && this.vm.compiler.parent.enclosingClass == getEnclosingClass(this.vm.compiler)) {
+					// this.vm.compiler.emitByteArg(CODE_STORE_FIELD_THIS, field);
+					var classCompiler = getEnclosingClassCompiler(this.vm.compiler);
+					var variable = classCompiler.resolveName(s);
+					classCompiler.loadVariable(variable);
+				} else {
+					this.vm.compiler.loadThis();
+					var classCompiler = getEnclosingClassCompiler(this.vm.compiler);
+					var variable = classCompiler.resolveName(s);
+					classCompiler.loadVariable(variable);
+				}
+			} else if (s.charAt(0) == "_" && s.charAt(1) == "_") {
+				// It definitely exists now, so resolve it properly. This is different from
+				// the above resolveLocal() call because we may have already closed over it
+				// as an upvalue.
+				var tokenName = s;
+				var variable = this.vm.compiler.resolveName(tokenName);
+				this.vm.compiler.loadVariable(variable);
+			} else {
+				// normal identity
+				var tokenName = s;
+				var variable = this.vm.compiler.resolveNonmodule(tokenName);
+				if (variable.index != -1) {
+					this.vm.compiler.loadVariable(variable);
+				} else {
+					// If we're inside a method and the name is lowercase, treat it as a method
+					// on this.
+					if (Compiler.isLocalName(tokenName) && getEnclosingClass(this.vm.compiler) != null) {
+						this.vm.compiler.loadThis();
+						// this.vm.compiler.namedCall(tokenName, false, CODE_CALL_0);
+						var signature = this.vm.compiler.signatureFromToken(tokenName, SIG_GETTER);
+
+						// Build the setter signature.
+						signature.type = SIG_SETTER;
+						signature.arity = 1;
+
+						callSignature(CODE_CALL_0, signature);
+					} else {
+						// Otherwise, look for a module-level variable with the name.
+						variable.scope = SCOPE_MODULE;
+						variable.index = this.module.variableNames.find(tokenName);
+						if (variable.index == -1) {
+							// Implicitly define a module-level variable in
+							// the hopes that we get a real definition later.
+							variable.index = this.module.declareVariable(this.vm, tokenName, WrenLexer.lineCount);
+
+							if (variable.index == -2) {
+								this.vm.compiler.error("Too many module variables defined.");
+							}
+						}
+
+						this.vm.compiler.loadVariable(variable);
+					}
+				}
+			}
+		}
+		#end
+	}
+
 	function getPrimary() {
 		return switch stream {
 			case [{tok: Const(c), pos: p}]: {
 					switch c {
 						case CIdent(s): {
+								loadIdentity(s);
 								return {expr: EVars([{name: s, expr: null, type: null}]), pos: p};
 							}
 						case CInt(i): {
@@ -1995,22 +2164,21 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 								var ifJump = this.vm.compiler.emitJump(CODE_JUMP_IF);
 								#end
 								return switch stream {
-									case [exp2 = orExpr(), {tok: DblDot}]:{
-										#if WREN_COMPILE
-										// Jump over the else branch when the if branch is taken.
-										var elseJump = this.vm.compiler.emitJump(CODE_JUMP);
-										this.vm.compiler.patchJump(ifJump);
-										#end
-										var exp3 = orExpr();
-										#if WREN_COMPILE
-										this.vm.compiler.patchJump(elseJump);
-										#end
-										var e = {expr: ETernary(exp, exp2, exp3), pos: exp3.pos};
-										return e;
-									}
+									case [exp2 = orExpr(), {tok: DblDot}]: {
+											#if WREN_COMPILE
+											// Jump over the else branch when the if branch is taken.
+											var elseJump = this.vm.compiler.emitJump(CODE_JUMP);
+											this.vm.compiler.patchJump(ifJump);
+											#end
+											var exp3 = assignment();
+											#if WREN_COMPILE
+											this.vm.compiler.patchJump(elseJump);
+											#end
+											var e = {expr: ETernary(exp, exp2, exp3), pos: exp3.pos};
+											return e;
+										}
 									case _: unexpected();
 								}
-								
 							}
 						case _: exp;
 					}
@@ -2063,208 +2231,12 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 	function assignment() {
 		return switch stream {
 			case [exp = ternary()]: {
-					#if WREN_COMPILE
-					var field = Compiler.MAX_FIELDS;
-					#end
-					switch exp.expr {
-						case EVars(d): {
-								#if WREN_COMPILE
-								if (d[0].name.charAt(0) == "_") {
-									// is field
-									// Initialize it with a fake value so we can keep parsing and minimize the
-									// number of cascaded errors.
-									field = Compiler.MAX_FIELDS;
-									var enclosingClass = getEnclosingClass(this.vm.compiler);
-									if (enclosingClass == null) {
-										this.vm.compiler.error("Cannot reference a field outside of a class definition.");
-									} else if (enclosingClass.isForeign) {
-										this.vm.compiler.error("Cannot define fields in a foreign class.");
-									} else if (enclosingClass.inStatic) {
-										this.vm.compiler.error("Cannot use an instance field in a static method.");
-									} else {
-										// Look up the field, or implicitly define it.
-										field = enclosingClass.fields.ensure(d[0].name);
-										if (field >= Compiler.MAX_FIELDS) {
-											this.vm.compiler.error('A class can only have ${Compiler.MAX_FIELDS} fields.');
-										}
-									}
-
-									switch peek(0) {
-										case {tok: Binop(OpAssign)}: {}
-										case _: {
-												#if WREN_COMPILE
-												// If we're directly inside a method, use a more optimal instruction.
-												if (this.vm.compiler.parent != null
-													&& this.vm.compiler.parent.enclosingClass == enclosingClass) {
-													this.vm.compiler.emitByteArg(CODE_LOAD_FIELD_THIS, field);
-												} else {
-													this.vm.compiler.loadThis();
-													this.vm.compiler.emitByteArg(CODE_LOAD_FIELD_THIS, field);
-												}
-												#end
-											}
-									}
-								} else if (d[0].name.charAt(0) == "_" && d[0].name.charAt(1) == "_") {
-									// is static field
-									var classCompiler = getEnclosingClassCompiler(this.vm.compiler);
-									if (classCompiler == null) {
-										this.vm.compiler.error("Cannot use a static field outside of a class definition.");
-										return null;
-									}
-
-									// Look up the name in the scope chain.
-									var tokenName = d[0].name;
-									// If this is the first time we've seen this static field, implicitly
-									// define it as a variable in the scope surrounding the class definition.
-									if (classCompiler.resolveLocal(tokenName) == -1) {
-										var symbol = classCompiler.declareVariable(tokenName);
-
-										// Implicitly initialize it to null.
-										classCompiler.emitOp(CODE_NULL);
-										classCompiler.defineVariable(symbol);
-									}
-									// It definitely exists now, so resolve it properly. This is different from
-									// the above resolveLocal() call because we may have already closed over it
-									// as an upvalue.
-									var variable = this.vm.compiler.resolveName(tokenName);
-									// this.vm.compiler.bareName(canAssign, variable);
-
-									switch peek(0) {
-										case {tok: Binop(OpAssign)}: {}
-										case _: this.vm.compiler.loadVariable(variable);
-									}
-								} else {
-									// normal identity
-									var tokenName = d[0].name;
-									var variable = this.vm.compiler.resolveNonmodule(tokenName);
-									if (variable.index != -1) {
-										// bareName(compiler, canAssign, variable);
-										switch peek(0) {
-											case {tok: Binop(OpAssign)}: {}
-											case _: this.vm.compiler.loadVariable(variable);
-										}
-									} else {
-										// If we're inside a method and the name is lowercase, treat it as a method
-										// on this.
-										if (Compiler.isLocalName(tokenName) && getEnclosingClass(this.vm.compiler) != null) {
-											this.vm.compiler.loadThis();
-											// this.vm.compiler.namedCall(tokenName, false, CODE_CALL_0);
-											var signature = this.vm.compiler.signatureFromToken(tokenName, SIG_GETTER);
-											var called = {
-												name: signature.name,
-												length: signature.length,
-												type: SIG_GETTER,
-												arity: 0
-											};
-										} else {
-											// Otherwise, look for a module-level variable with the name.
-											variable.scope = SCOPE_MODULE;
-											variable.index = this.module.variableNames.find(tokenName);
-											if (variable.index == -1) {
-												// Implicitly define a module-level variable in
-												// the hopes that we get a real definition later.
-												variable.index = this.module.declareVariable(this.vm, tokenName, WrenLexer.lineCount);
-
-												if (variable.index == -2) {
-													this.vm.compiler.error("Too many module variables defined.");
-												}
-											}
-
-											switch peek(0) {
-												case {tok: Binop(OpAssign)}: {}
-												case _: this.vm.compiler.loadVariable(variable);
-											}
-										}
-									}
-								}
-								#end
-							}
-						case _:
-					}
-
 					return switch stream {
 						case [{tok: Binop(OpAssign), pos: p}]: {
 								var value = ternary();
 								return switch exp.expr {
 									case EVars(d): {
-											#if WREN_COMPILE
-											if (d[0].name.charAt(0) == "_") {
-												// If we're directly inside a method, use a more optimal instruction.
-												if (this.vm.compiler.parent != null
-													&& this.vm.compiler.parent.enclosingClass == getEnclosingClass(this.vm.compiler)) {
-													this.vm.compiler.emitByteArg(CODE_STORE_FIELD_THIS, field);
-												} else {
-													this.vm.compiler.loadThis();
-													this.vm.compiler.emitByteArg(CODE_STORE_FIELD, field);
-												}
-											} else if (d[0].name.charAt(0) == "_" && d[0].name.charAt(1) == "_") {
-												// It definitely exists now, so resolve it properly. This is different from
-												// the above resolveLocal() call because we may have already closed over it
-												// as an upvalue.
-												var tokenName = d[0].name;
-												var variable = this.vm.compiler.resolveName(tokenName);
-												// Emit the store instruction.
-												switch (variable.scope) {
-													case SCOPE_LOCAL:
-														this.vm.compiler.emitByteArg(CODE_STORE_LOCAL, variable.index);
-													case SCOPE_UPVALUE:
-														this.vm.compiler.emitByteArg(CODE_STORE_UPVALUE, variable.index);
-													case SCOPE_MODULE:
-														this.vm.compiler.emitShortArg(CODE_STORE_MODULE_VAR, variable.index);
-												}
-											} else {
-												// normal identity
-												var tokenName = d[0].name;
-												var variable = this.vm.compiler.resolveNonmodule(tokenName);
-												if (variable.index != -1) {
-													// bareName(compiler, canAssign, variable);
-													switch (variable.scope) {
-														case SCOPE_LOCAL:
-															this.vm.compiler.emitByteArg(CODE_STORE_LOCAL, variable.index);
-														case SCOPE_UPVALUE:
-															this.vm.compiler.emitByteArg(CODE_STORE_UPVALUE, variable.index);
-														case SCOPE_MODULE:
-															this.vm.compiler.emitShortArg(CODE_STORE_MODULE_VAR, variable.index);
-													}
-												} else {
-													// If we're inside a method and the name is lowercase, treat it as a method
-													// on this.
-													if (Compiler.isLocalName(tokenName) && getEnclosingClass(this.vm.compiler) != null) {
-														this.vm.compiler.loadThis();
-														// this.vm.compiler.namedCall(tokenName, false, CODE_CALL_0);
-														var signature = this.vm.compiler.signatureFromToken(tokenName, SIG_GETTER);
-
-														// Build the setter signature.
-														signature.type = SIG_SETTER;
-														signature.arity = 1;
-
-														callSignature(CODE_CALL_0, signature);
-													} else {
-														// Otherwise, look for a module-level variable with the name.
-														variable.scope = SCOPE_MODULE;
-														variable.index = this.module.variableNames.find(tokenName);
-														if (variable.index == -1) {
-															// Implicitly define a module-level variable in
-															// the hopes that we get a real definition later.
-															variable.index = this.module.declareVariable(this.vm, tokenName, WrenLexer.lineCount);
-
-															if (variable.index == -2) {
-																this.vm.compiler.error("Too many module variables defined.");
-															}
-														}
-
-														switch (variable.scope) {
-															case SCOPE_LOCAL:
-																this.vm.compiler.emitByteArg(CODE_STORE_LOCAL, variable.index);
-															case SCOPE_UPVALUE:
-																this.vm.compiler.emitByteArg(CODE_STORE_UPVALUE, variable.index);
-															case SCOPE_MODULE:
-																this.vm.compiler.emitShortArg(CODE_STORE_MODULE_VAR, variable.index);
-														}
-													}
-												}
-											}
-											#end
+											storeIdentity(d[0].name);
 											{expr: EBinop(OpAssign, exp, value), pos: value.pos};
 										}
 									case EField(_, name, isSuper): {
@@ -2279,6 +2251,8 @@ class WrenParser extends hxparse.Parser<hxparse.LexerTokenSource<Token>, Token> 
 												// Get the token for the method name.
 												var instruction = CODE_SUPER_0;
 												callSignature(instruction, signature);
+											} else {
+												callSignature(CODE_CALL_0, signature);
 											}
 											#end
 											{expr: EBinop(OpAssign, exp, value), pos: value.pos};
