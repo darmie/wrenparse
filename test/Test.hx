@@ -17,6 +17,7 @@ class Test {
 	}
 
 	public static function runner(parser:WrenParser) {
+		#if !WREN_COMPILE
 		try {
 			var p = parser.parse();
 			var buf = new StringBuf();
@@ -33,6 +34,7 @@ class Test {
 			trace(e.details());
 			throw e;
 		}
+		#end
 	}
 
 	public static function runner2() {
@@ -46,9 +48,9 @@ class Test {
 			config.errorFn = (vm:VM, type:ErrorType, moduleName:String, line:Int, message:String) -> {
 				var buf = new StringBuf();
 				switch type {
-					case WREN_ERROR_COMPILE: buf.add('[MODULE $moduleName][COMPILE ERROR]: ');
-					case WREN_ERROR_RUNTIME: buf.add('[MODULE $moduleName][RUNTIME ERROR]: ');
-					case WREN_ERROR_STACK_TRACE: buf.add('[MODULE $moduleName][TRACE]: ');
+					case WREN_ERROR_COMPILE: buf.add('[MODULE $moduleName][Line $line][COMPILE ERROR]: ');
+					case WREN_ERROR_RUNTIME: buf.add('[MODULE $moduleName][Line $line][RUNTIME ERROR]: ');
+					case WREN_ERROR_STACK_TRACE: buf.add('[MODULE $moduleName][Line $line][TRACE]: ');
 				}
 				buf.add(message);
 				trace(buf.toString());

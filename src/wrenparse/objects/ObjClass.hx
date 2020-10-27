@@ -1,9 +1,9 @@
 package wrenparse.objects;
 
-import wrenparse.Compiler.Code;
+import wrenparse.Data.Code;
 import wrenparse.IO.Buffer;
 import wrenparse.objects.ObjClosure;
-import wrenparse.Value.Primitive;
+import wrenparse.Primitive.PrimitiveFunc;
 import wrenparse.VM;
 
 enum MethodType {
@@ -22,7 +22,7 @@ enum MethodType {
 }
 
 typedef MethodAs = {
-	?primitive:Primitive,
+	?primitive:PrimitiveFunc,
 	?foreign:Dynamic,
 	// WrenForeignMethodFn
 	?closure:ObjClosure
@@ -34,6 +34,7 @@ class Method {
 
 	public function new(type:MethodType) {
 		this.type = type;
+		this.as = {};
 	}
 }
 

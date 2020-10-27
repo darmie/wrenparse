@@ -2,6 +2,7 @@ package wrenparse.objects;
 
 import wrenparse.VM;
 import wrenparse.Utils;
+import wrenparse.objects.ObjClass.MethodType;
 
 class ObjForeign extends Obj {
 	public var data:Dynamic;

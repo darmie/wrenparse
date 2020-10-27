@@ -78,16 +78,6 @@ class ValuePointer {
 	}
 }
 
-/**
- * The type of a primitive function.
- *
- * Primitives are similiar to foreign functions, but have more direct access to
- * VM internals. It is passed the arguments in [args]. If it returns a value,
- * it places it in `args[0]` and returns `true`. If it causes a runtime error
- * or modifies the running fiber, it returns `false`.
- */
-typedef Primitive = (vm:VM, args:ValuePointer) -> Bool;
-
 typedef ValueAs = {
 	?num:Float,
 	?obj:Obj
@@ -106,7 +96,13 @@ class Value {
 		return this.as.obj;
 	}
 
+	public inline function AS_RANGE():ObjRange {
+		return cast this.as.obj;
+	}
 
+	public inline function AS_FIBER():ObjFiber {
+		return cast this.as.obj;
+	}
 
 	public inline function AS_STRING():ObjString {
 		return cast this.as.obj;

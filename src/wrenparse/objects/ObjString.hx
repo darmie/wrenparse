@@ -73,7 +73,7 @@ class ObjString extends Obj {
 	}
 
 	public static function newString(vm:VM, text:String):Value {
-		Utils.ASSERT(text.length != 0 || text == null, "Unexpected NULL string.");
+		Utils.ASSERT(text.length == 0 || text != null, "Unexpected NULL string.");
 		var str = new ObjString(vm, text);
 		str.hashString();
 		return str.OBJ_VAL();

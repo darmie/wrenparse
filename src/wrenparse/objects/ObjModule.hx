@@ -40,12 +40,14 @@ class ObjModule extends Obj {
 		vm.popRoot();
 	}
 
-	public function defineVariable(vm:VM, name:String, length:Int, value:Value, line:Null<Int>):Int {
+	public function defineVariable(vm:VM, name:String, value:Value, line:Null<Int>):Int {
 		if (variables.count == Compiler.MAX_MODULE_VARS)
 			return -2;
+		
 		if (value.IS_OBJ())
 			vm.pushRoot(value.AS_OBJ());
 		// See if the variable is already explicitly or implicitly declared.
+	
 		var symbol = variableNames.find(name);
 		if (symbol == -1) {
 			// Brand new variable.

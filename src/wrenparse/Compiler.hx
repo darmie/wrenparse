@@ -11,422 +11,11 @@ import wrenparse.objects.*;
 import wrenparse.Utils.FixedArray;
 import wrenparse.IO.IntBuffer;
 import wrenparse.IO.SymbolTable;
-import wrenparse.Data.StatementDef;
+import wrenparse.Data;
 
 using StringTools;
 
-typedef Local = {
-	// The name of the local variable. This points directly into the original
-	// source code string.
-	?name:String,
-	// The length of the local variable's name.
-	?length:Int,
-	// The depth in the scope chain that this variable was declared at. Zero is
-	// the outermost scope--parameters for a method, or the first local block in
-	// top level code. One is the scope within that, etc.
-	?depth:Int,
-	// If this local variable is being used as an upvalue.
-	?isUpvalue:Bool
-}
-
-typedef CompilerUpvalue = {
-	// True if this upvalue is capturing a local variable from the enclosing
-	// function. False if it's capturing an upvalue.
-	isLocal:Bool,
-	// The index of the local or upvalue being captured in the enclosing function.
-	index:Int
-}
-
-/**
- *  Bookkeeping information for the current loop being compiled.
- */
-typedef Loop = {
-	// Index of the instruction that the loop should jump back to.
-	?start:Int,
-	// Index of the argument for the CODE_JUMP_IF instruction used to exit the
-	// loop. Stored so we can patch it once we know where the loop ends.
-	?exitJump:Int,
-	// Index of the first instruction of the body of the loop.
-	?body:Int,
-	// Depth of the scope(s) that need to be exited if a break is hit inside the
-	// loop.
-	?scopeDepth:Int,
-	// The loop enclosing this one, or NULL if this is the outermost loop.
-	?enclosing:Null<Loop>,
-}
-
-/**
- * The different signature syntaxes for different kinds of methods.
- */
-enum SignatureType {
-	// A name followed by a (possibly empty) parenthesized parameter list. Also
-	// used for binary operators.
-	SIG_METHOD;
-
-	// Just a name. Also used for unary operators.
-	SIG_GETTER;
-	// A name followed by "=".
-	SIG_SETTER;
-	// A square bracketed parameter list.
-	SIG_SUBSCRIPT;
-	// A square bracketed parameter list followed by "=".
-	SIG_SUBSCRIPT_SETTER;
-	// A constructor initializer function. This has a distinct signature to
-	// prevent it from being invoked directly outside of the constructor on the
-	// metaclass.
-	SIG_INITIALIZER;
-}
-
-typedef TSignature = {
-	?type:SignatureType,
-	?length:Int,
-	?name:String,
-	?arity:Int
-}
-
-@:forward(type, length, name, arity)
-abstract Signature(TSignature) from TSignature to TSignature {
-	inline function new(sig:TSignature) {
-		this = sig;
-	}
-
-	inline function parameterList(name:String, numParams:Int, leftBracket:String, rightBracket:String) {
-		var i = 0;
-		name += leftBracket;
-		while (i < numParams && i < Compiler.MAX_PARAMETERS) {
-			if (i > 0)
-				name += ",";
-			name += "_";
-			i++;
-		}
-		name += rightBracket;
-	}
-
-	public inline function toString():String {
-		var name = this.name;
-		switch this.type {
-			case SIG_METHOD:
-				parameterList(name, this.arity, "(", ")");
-			case SIG_GETTER:
-				{}
-			case SIG_SETTER:
-				{
-					name += "=";
-					parameterList(name, this.arity, "(", ")");
-				}
-			case SIG_SUBSCRIPT:
-				parameterList(name, this.arity, "[", "]");
-			case SIG_SUBSCRIPT_SETTER:
-				{
-					parameterList(name, this.arity - 1, "[", "]");
-					name += "=";
-					parameterList(name, this.arity, "(", ")");
-				}
-			case SIG_INITIALIZER:
-				{
-					name = 'init $name';
-					parameterList(name, this.arity, "(", ")");
-				}
-		}
-		name += String.fromCharCode(0);
-		return name;
-	}
-}
-
-typedef GrammarFn = (compiler:Compiler, canAssign:Bool) -> Void;
-typedef SignatureFn = (compiler:Compiler, signature:Signature) -> Void;
-
-enum Precedence {
-	PREC_NONE;
-	PREC_LOWEST;
-	PREC_ASSIGNMENT; // =
-	PREC_CONDITIONAL; // ?:
-	PREC_LOGICAL_OR; // ||
-	PREC_LOGICAL_AND; // &&
-	PREC_EQUALITY; // == !=
-	PREC_IS; // is
-	PREC_COMPARISON; // < > <= >=
-	PREC_BITWISE_OR; // |
-	PREC_BITWISE_XOR; // ^
-	PREC_BITWISE_AND; // &
-	PREC_BITWISE_SHIFT; // << >>
-	PREC_RANGE; // .. ...
-	PREC_TERM; // + -
-	PREC_FACTOR; // * / %
-	PREC_UNARY; // unary - ! ~
-	PREC_CALL; // . () []
-	PREC_PRIMARY;
-}
-
-typedef GrammarRule = {
-	?prefix:GrammarFn,
-	?infix:GrammarFn,
-	?method:SignatureFn,
-	?precedence:Precedence,
-	?name:String
-};
-
-/**
- * Bookkeeping information for compiling a class definition.
- */
-typedef ClassInfo = {
-	// The name of the class.
-	?name:ObjString,
-	// Symbol table for the fields of the class.
-	?fields:SymbolTable,
-	// Symbols for the methods defined by the class. Used to detect duplicate
-	// method definitions.
-	?methods:IntBuffer,
-	?staticMethods:IntBuffer,
-	// True if the class being compiled is a foreign class.
-	?isForeign:Bool,
-	// True if the current method being compiled is static.
-	?inStatic:Bool,
-	// The signature of the method being compiled.
-	?signature:Signature
-}
-
-/**
- *  Describes where a variable is declared
- */
-enum Scope {
-	// A local variable in the current function.
-	SCOPE_LOCAL;
-
-	// A local variable declared in an enclosing function.
-	SCOPE_UPVALUE;
-	// A top-level module variable.
-	SCOPE_MODULE;
-}
-
-/**
- * A reference to a variable and the scope where it is defined. This contains
- * enough information to emit correct code to load or store the variable.
- */
-class Variable {
-	/**
-	 * The stack slot, upvalue slot, or module symbol defining the variable
-	 */
-	public var index:Int;
-
-	/**
-	 * Where the variable is declared.
-	 */
-	public var scope:Scope;
-
-	public function new(index:Int, scope:Scope) {
-		this.index = index;
-		this.scope = scope;
-	}
-}
-
-/**
- * https://github.com/wren-lang/wren/blob/main/src/vm/wren_opcodes.h
- */
-enum abstract Code(Int) from Int to Int {
-	/**
-	 * Load the constant at index [arg].
-	 */
-	var CODE_CONSTANT = 0;
-
-	/**
-	 * Push null onto the stack.
-	 */
-	var CODE_NULL;
-
-	/**
-	 * Push false onto the stack.
-	 */
-	var CODE_FALSE;
-
-	/**
-	 * Push true onto the stack.
-	 */
-	var CODE_TRUE;
-
-	/**
-	 * Pushes the value in the given local slot.
-	 */
-	var CODE_LOAD_LOCAL_0;
-
-	var CODE_LOAD_LOCAL_1;
-	var CODE_LOAD_LOCAL_2;
-	var CODE_LOAD_LOCAL_3;
-	var CODE_LOAD_LOCAL_4;
-	var CODE_LOAD_LOCAL_5;
-	var CODE_LOAD_LOCAL_6;
-	var CODE_LOAD_LOCAL_7;
-	var CODE_LOAD_LOCAL_8;
-
-	/**
-	 * Pushes the value in local slot [arg].
-	 */
-	var CODE_LOAD_LOCAL;
-
-	/**
-	 * Stores the top of stack in local slot [arg]. Does not pop it.
-	 */
-	var CODE_STORE_LOCAL;
-
-	/**
-	 * Pushes the value in upvalue [arg].
-	 */
-	var CODE_LOAD_UPVALUE;
-
-	/**
-	 * Stores the top of stack in upvalue [arg]. Does not pop it.
-	 */
-	var CODE_STORE_UPVALUE;
-
-	/**
-	 * Pushes the value of the top-level variable in slot [arg].
-	 */
-	var CODE_LOAD_MODULE_VAR;
-
-	/**
-	 * Stores the top of stack in top-level variable slot [arg]. Does not pop it.
-	 */
-	var CODE_STORE_MODULE_VAR;
-
-	/**
-	 * Pushes the value of the field in slot [arg] of the receiver of the current
-	 * function. This is used for regular field accesses on "this" directly in
-	 * methods. This instruction is faster than the more general CODE_LOAD_FIELD
-	 * instruction.
-	 */
-	var CODE_LOAD_FIELD_THIS;
-
-	/**
-	 * Stores the top of the stack in field slot [arg] in the receiver of the
-	 * current value. Does not pop the value. This instruction is faster than the
-	 * more general CODE_LOAD_FIELD instruction.
-	 */
-	var CODE_STORE_FIELD_THIS;
-
-	/**
-	 * Pops an instance and pushes the value of the field in slot [arg] of it.
-	 */
-	var CODE_LOAD_FIELD;
-
-	/**
-	 * Pops an instance and stores the subsequent top of stack in field slot
-	 * [arg] in it. Does not pop the value.
-	 */
-	var CODE_STORE_FIELD;
-
-	/**
-	 * Pop and discard the top of stack.
-	 */
-	var CODE_POP;
-
-	/**
-	 * Invoke the method with symbol [arg]. The number indicates the number of
-	 * arguments (not including the receiver).
-	 */
-	var CODE_CALL_0;
-
-	var CODE_CALL_1;
-	var CODE_CALL_2;
-	var CODE_CALL_3;
-	var CODE_CALL_4;
-	var CODE_CALL_5;
-	var CODE_CALL_6;
-	var CODE_CALL_7;
-	var CODE_CALL_8;
-	var CODE_CALL_9;
-	var CODE_CALL_10;
-	var CODE_CALL_11;
-	var CODE_CALL_12;
-	var CODE_CALL_13;
-	var CODE_CALL_14;
-	var CODE_CALL_15;
-	var CODE_CALL_16;
-
-	/**
-	 * Invoke a superclass method with symbol [arg]. The number indicates the
-	 * number of arguments (not including the receiver).
-	 */
-	var CODE_SUPER_0;
-
-	var CODE_SUPER_1;
-	var CODE_SUPER_2;
-	var CODE_SUPER_3;
-	var CODE_SUPER_4;
-	var CODE_SUPER_5;
-	var CODE_SUPER_6;
-	var CODE_SUPER_7;
-	var CODE_SUPER_8;
-	var CODE_SUPER_9;
-	var CODE_SUPER_10;
-	var CODE_SUPER_11;
-	var CODE_SUPER_12;
-	var CODE_SUPER_13;
-	var CODE_SUPER_14;
-	var CODE_SUPER_15;
-	var CODE_SUPER_16;
-	var CODE_JUMP;
-	var CODE_LOOP;
-	var CODE_JUMP_IF;
-	var CODE_AND;
-	var CODE_OR;
-	var CODE_CLOSE_UPVALUE;
-	var CODE_RETURN;
-	var CODE_CLOSURE;
-	var CODE_CONSTRUCT;
-	var CODE_FOREIGN_CONSTRUCT;
-	var CODE_CLASS;
-	var CODE_FOREIGN_CLASS;
-	var CODE_METHOD_INSTANCE;
-	var CODE_METHOD_STATIC;
-	var CODE_END_MODULE;
-	var CODE_IMPORT_MODULE;
-	var CODE_IMPORT_VARIABLE;
-	var CODE_END;
-
-	public inline function stackEffect() {
-		return switch this {
-			case CODE_CONSTANT | CODE_NULL | CODE_FALSE | CODE_TRUE | CODE_LOAD_LOCAL_0 | CODE_LOAD_LOCAL_1 | CODE_LOAD_LOCAL_2 | CODE_LOAD_LOCAL_3 |
-				CODE_LOAD_LOCAL_4 | CODE_LOAD_LOCAL_5 | CODE_LOAD_LOCAL_6 | CODE_LOAD_LOCAL_7 | CODE_LOAD_LOCAL_8 | CODE_LOAD_LOCAL | CODE_LOAD_UPVALUE |
-				CODE_LOAD_MODULE_VAR | CODE_LOAD_FIELD_THIS | CODE_LOAD_FIELD | CODE_CLOSURE | CODE_END_MODULE | CODE_IMPORT_MODULE | CODE_IMPORT_VARIABLE: 1;
-			case CODE_STORE_LOCAL | CODE_STORE_UPVALUE | CODE_STORE_MODULE_VAR | CODE_STORE_FIELD_THIS | CODE_STORE_FIELD | CODE_CALL_0 | CODE_SUPER_0 |
-				CODE_JUMP | CODE_LOOP | CODE_RETURN | CODE_CONSTRUCT | CODE_FOREIGN_CONSTRUCT | CODE_END: 0;
-			case CODE_POP | CODE_CALL_1 | CODE_SUPER_1 | CODE_JUMP_IF | CODE_AND | CODE_OR | CODE_CLOSE_UPVALUE | CODE_CLASS | CODE_FOREIGN_CLASS: -1;
-			case CODE_CALL_2 | CODE_METHOD_INSTANCE | CODE_METHOD_STATIC: -2;
-			case CODE_CALL_3: -3;
-			case CODE_CALL_4: -4;
-			case CODE_CALL_5: -5;
-			case CODE_CALL_6: -6;
-			case CODE_CALL_7: -7;
-			case CODE_CALL_8: -8;
-			case CODE_CALL_9: -9;
-			case CODE_CALL_10: -10;
-			case CODE_CALL_11: -11;
-			case CODE_CALL_12: -12;
-			case CODE_CALL_13: -13;
-			case CODE_CALL_14: -14;
-			case CODE_CALL_15: -15;
-			case CODE_CALL_16: -12;
-
-			case CODE_SUPER_2: -2;
-			case CODE_SUPER_3: -3;
-			case CODE_SUPER_4: -4;
-			case CODE_SUPER_5: -5;
-			case CODE_SUPER_6: -6;
-			case CODE_SUPER_7: -7;
-			case CODE_SUPER_8: -8;
-			case CODE_SUPER_9: -9;
-			case CODE_SUPER_10: -10;
-			case CODE_SUPER_11: -11;
-			case CODE_SUPER_12: -12;
-			case CODE_SUPER_13: -13;
-			case CODE_SUPER_14: -14;
-			case CODE_SUPER_15: -15;
-			case CODE_SUPER_16: -12;
-			case _: throw "invalid opcode";
-		}
-	}
-}
-
+@:allow(wrenparse.Grammar)
 class Compiler {
 	public var parser:WrenParser;
 
@@ -583,31 +172,32 @@ class Compiler {
 
 	public var constants:ObjMap;
 
-	// public static inline function UNUSED():GrammarRule return {precedence:PREC_NONE};
-	// public static inline function PREFIX(prefixFn:GrammarFn):GrammarRule return { prefix: prefixFn, precedence:PREC_NONE};
-	// public static inline function INFIX(prec:Precedence, infixFn:GrammarFn):GrammarRule return { infix: infixFn, precedence:prec};
-	// public static inline function INFIX_OPERATOR(prec:Precedence, name:String):GrammarRule return { infix: infixOp, signature: precedence:prec};
+	var rules:GrammarRules;
 
 	public function error(msg:String = "") {
-		var token = this.parser.last;
-		this.parser.errors.push(SError(msg, token.pos, WrenLexer.lineCount - 1));
-
-		var buf = new StringBuf();
-		buf.add(msg);
-		for (x in this.parser.errors) {
-			switch x {
-				case SError(msg, _, line):
-					buf.add('[Line: ${line}] ${msg} \n');
-				case _:
-					continue;
-			}
+		var token = this.parser.previous;
+		// If the parse error was caused by an error token, the lexer has already
+		// reported it.
+		switch token.type {
+			case TOKEN_ERROR:
+				{
+					return;
+				}
+			case TOKEN_LINE:
+				{
+					this.parser.printError(token.line, "Error at newline", msg);
+				}
+			case TOKEN_EOF:
+				{
+					this.parser.printError(token.line, "Error at end of file", msg);
+				}
+			case _:
+				{
+					var label:String = "";
+					label += 'Error at \'${token.start}\'';
+					this.parser.printError(token.line, label, msg);
+				}
 		}
-
-		var module = this.parser.module.name;
-		var moduleName = module != null ? module.value.join("") : "<unknown>";
-
-		var message = buf.toString();
-		this.parser.vm.config.errorFn(this.parser.vm, WREN_ERROR_COMPILE, moduleName, WrenLexer.lineCount - 1, message);
 	}
 
 	/**
@@ -616,10 +206,10 @@ class Compiler {
 	 * @return Int
 	 */
 	public function addConstant(constant:Value):Int {
-		if (this.parser.errors.length >= 1) {
+		if (this.parser.hasError) {
 			return -1;
 		}
-		
+
 		// See if we already have a constant for the value. If so, reuse it.
 		if (this.constants != null) {
 			var exisiting:Value = constants.get(this.parser.vm, constant);
@@ -630,7 +220,7 @@ class Compiler {
 		// It's a new constant.
 		if (this.fn.constants.count < MAX_CONSTANTS) {
 			if (constant.IS_OBJ())
-				this.parser.vm.pushRoot(constant.as.obj);
+				this.parser.vm.pushRoot(constant.AS_OBJ());
 			fn.constants.write(constant);
 			if (this.constants == null) {
 				this.constants = new ObjMap(this.parser.vm);
@@ -644,21 +234,28 @@ class Compiler {
 		return this.fn.constants.count - 1;
 	}
 
-	function new() {}
+	function new() {
+		this.rules = new GrammarRules();
+	}
 
 	public static function init(parser:WrenParser, ?parent:Null<Compiler>, isMethod:Bool = false):Compiler {
 		final compiler = new Compiler();
 		compiler.parent = parent;
 		compiler.parser = parser;
 		compiler.loop = null;
-		compiler.enclosingClass = null;
+		compiler.enclosingClass = {
+			signature: {},
+			staticMethods: new IntBuffer(parser.vm),
+			methods: new IntBuffer(parser.vm),
+			fields: new SymbolTable(parser.vm)
+		};
 
 		// Initialize these to NULL before allocating in case a GC gets triggered in
 		// the middle of initializing the compiler.
 		compiler.fn = null;
 		compiler.constants = null;
 
-		compiler.parser.vm.compiler = compiler;
+		parser.vm.compiler = compiler;
 
 		// Declare a local slot for either the closure or method receiver so that we
 		// don't try to reuse that slot for a user-defined local variable. For
@@ -670,7 +267,7 @@ class Compiler {
 
 		compiler.numLocals = 1;
 		compiler.numSlots = compiler.numLocals;
-		
+
 		compiler.locals = [];
 		compiler.locals[0] = {};
 		if (isMethod) {
@@ -680,7 +277,7 @@ class Compiler {
 			compiler.locals[0].name = null;
 			compiler.locals[0].length = 0;
 		}
-		
+
 		compiler.locals[0].depth = -1;
 		compiler.locals[0].isUpvalue = false;
 
@@ -697,6 +294,552 @@ class Compiler {
 		return compiler;
 	}
 
+	// PARSING
+
+	/**
+	 * Returns the type of the current token.
+	 * @return TokenType
+	 */
+	inline function peek():TokenType {
+		return this.parser.current.type;
+	}
+
+	/**
+	 * Consumes the current token if its type is [expected]. Returns true if a
+	 * token was consumed.
+	 * @param expected
+	 * @return Bool
+	 */
+	inline function match(expected:TokenType):Bool {
+		if (peek() != expected)
+			return false;
+		this.parser.nextToken();
+		return true;
+	}
+
+	/**
+	 * Consumes the current token. Emits an error if its type is not [expected].
+	 * @param expected
+	 * @param errorMessage
+	 */
+	function consume(expected:TokenType, errorMessage:String) {
+		this.parser.nextToken();
+		if (this.parser.previous.type != expected) {
+			error(errorMessage);
+
+			// If the next token is the one we want, assume the current one is just a
+			// spurious error and discard it to minimize the number of cascaded errors.
+			if (this.parser.current.type == expected)
+				this.parser.nextToken();
+		}
+	}
+
+	/**
+	 * Matches one or more newlines. Returns true if at least one was found.
+	 * @return Bool
+	 */
+	function matchLine():Bool {
+		if (!match(TOKEN_LINE))
+			return false;
+		while (match(TOKEN_LINE)) {}
+		return true;
+	}
+
+	/**
+	 * Discards any newlines starting at the current token.
+	 */
+	function ignoreNewlines() {
+		matchLine();
+	}
+
+	/**
+	 * Consumes the current token. Emits an error if it is not a newline. Then
+	 * discards any duplicate newlines following it.
+	 * @param errorMessage
+	 */
+	function consumeLine(errorMessage:String) {
+		consume(TOKEN_LINE, errorMessage);
+		ignoreNewlines();
+	}
+
+	function getRule(type:TokenType):GrammarRule {
+		return rules[type];
+	}
+
+	/**
+	 * The main entrypoint for the top-down operator precedence parser.
+	 * @param prec
+	 */
+	function parsePrecedence(precedence:Int) {
+		this.parser.nextToken();
+		var prefix = rules[this.parser.previous.type].prefix;
+		if (prefix == null) {
+			error("Expected expression.");
+			return;
+		}
+
+		// Track if the precendence of the surrounding expression is low enough to
+		// allow an assignment inside this one. We can't compile an assignment like
+		// a normal expression because it requires us to handle the LHS specially --
+		// it needs to be an lvalue, not an rvalue. So, for each of the kinds of
+		// expressions that are valid lvalues -- names, subscripts, fields, etc. --
+		// we pass in whether or not it appears in a context loose enough to allow
+		// "=". If so, it will parse the "=" itself and handle it appropriately.
+		var canAssign = precedence <= cast(PREC_CONDITIONAL, Int);
+
+		prefix(this, canAssign);
+		
+		while (precedence <= cast(rules[this.parser.current.type].precedence, Int)) {
+			this.parser.nextToken();
+			var infix = rules[this.parser.previous.type].infix;
+			infix(this, canAssign);
+		}
+	}
+
+	function expression() {
+		parsePrecedence(PREC_LOWEST);
+	}
+
+	/**
+	 * Compiles a "definition". These are the statements that bind new variables.
+	 * They can only appear at the top level of a block and are prohibited in places
+	 * like the non-curly body of an if or while.
+	 */
+	function definition() {
+	
+		if (match(TOKEN_CLASS)) {
+			classDefinition(false);
+		} else if (match(TOKEN_FOREIGN)) {
+			consume(TOKEN_CLASS, "Expect 'class' after 'foreign'.");
+			classDefinition(true);
+		} else if (match(TOKEN_IMPORT)) {
+			import_();
+		} else if (match(TOKEN_VAR)) {
+			variableDefinition();
+		} else {
+			statement();
+		}
+	}
+
+	/**
+	 * Compiles a class definition. Assumes the "class" token has already been
+	 * consumed (along with a possibly preceding "foreign" token).
+	 * @param isForeign
+	 */
+	function classDefinition(isForeign:Bool) {
+		// Create a variable to store the class in.
+		var classVariable:Variable = new Variable(declareNamedVariable(), this.scopeDepth == -1 ? SCOPE_MODULE : SCOPE_LOCAL);
+
+		// Create shared class name value
+		var classNameString:Value = ObjString.newString(this.parser.vm, this.parser.previous.start);
+
+		// Create class name string to track method duplicates
+		var className:ObjString = classNameString.AS_STRING();
+
+		// Make a string constant for the name.
+		emitConstant(classNameString);
+	
+
+		// Load the superclass (if there is one).
+		if (match(TOKEN_IS)) {
+			parsePrecedence(PREC_CALL);
+		} else {
+			// Implicitly inherit from Object.
+			loadCoreVariable("Object");
+		}
+
+		// Store a placeholder for the number of fields argument. We don't know the
+		// count until we've compiled all the methods to see which fields are used.
+
+		var numFieldsInstruction = -1;
+		if (isForeign) {
+			emitOp(CODE_FOREIGN_CLASS);
+		} else {
+			numFieldsInstruction = emitByteArg(CODE_CLASS, 255);
+		}
+
+		// Store it in its name.
+		defineVariable(classVariable.index);
+
+		// Push a local variable scope. Static fields in a class body are hoisted out
+		// into local variables declared in this scope. Methods that use them will
+		// have upvalues referencing them.
+		pushScope();
+
+		var classInfo:ClassInfo = {
+			isForeign: isForeign,
+			name: className
+		};
+		
+		// Set up a symbol table for the class's fields. We'll initially compile
+		// them to slots starting at zero. When the method is bound to the class, the
+		// bytecode will be adjusted by [wrenBindMethod] to take inherited fields
+		// into account.
+		classInfo.fields = new SymbolTable(this.parser.vm);
+
+		// Set up symbol buffers to track duplicate static and instance methods.
+		classInfo.methods = new IntBuffer(this.parser.vm);
+		classInfo.staticMethods = new IntBuffer(this.parser.vm);
+		this.enclosingClass = classInfo;
+
+		
+		// Compile the method definitions.
+		consume(TOKEN_LEFT_BRACE, "Expect '{' after class declaration.");
+		matchLine();
+		while (!match(TOKEN_RIGHT_BRACE)) {
+			if (!method(classVariable))
+				break;
+			
+			// Don't require a newline after the last definition.
+			if (match(TOKEN_RIGHT_BRACE))
+				break;
+
+			consumeLine("Expect newline after definition in class.");
+		}
+
+		// Update the class with the number of fields.
+		if (!isForeign) {
+			this.fn.code.data.set(numFieldsInstruction, classInfo.fields.count);
+		}
+
+		// Clear symbol tables for tracking field and method names.
+		classInfo.fields.clear();
+		classInfo.methods.clear();
+		classInfo.staticMethods.clear();
+		this.enclosingClass = null;
+		popScope();
+	}
+
+	/**
+	 * Compiles a "var" variable definition statement.
+	 */
+	function variableDefinition() {
+		// Grab its name, but don't declare it yet. A (local) variable shouldn't be
+		// in scope in its own initializer.
+		consume(TOKEN_NAME, "Expect variable name.");
+		var nameToken = this.parser.previous;
+		
+		// Compile the initializer.
+		if (match(TOKEN_EQ)) {
+			ignoreNewlines();
+			expression();
+		} else {
+			// Default initialize it to null.
+			Grammar.null_(this, false);
+		}
+		// Now put it in scope.
+		var symbol = declareVariable(nameToken);
+		defineVariable(symbol);
+	}
+
+	/**
+	 * Compiles an "import" statement.
+	 *
+	 * An import compiles to a series of instructions. Given:
+	 *
+	 * 		import "foo" for Bar, Baz
+	 *
+	 * We compile a single IMPORT_MODULE "foo" instruction to load the module
+	 * itself. When that finishes executing the imported module, it leaves the
+	 * ObjModule in vm.lastModule. Then, for Bar and Baz, we:
+	 *
+	 * * Declare a variable in the current scope with that name.
+	 * * Emit an IMPORT_VARIABLE instruction to load the variable's value from the
+	 * 	 other module.
+	 * * Compile the code to store that value in the variable in this scope.
+	 */
+	function import_() {
+		ignoreNewlines();
+		consume(TOKEN_STRING, "Expect a string after 'import'.");
+		var moduleConstant = addConstant(this.parser.previous.value);
+
+		// Load the module.
+		emitShortArg(CODE_IMPORT_MODULE, moduleConstant);
+
+		// Discard the unused result value from calling the module body's closure.
+		emitOp(CODE_POP);
+
+		// The for clause is optional.
+		if (!match(TOKEN_FOR))
+			return;
+
+		// Compile the comma-separated list of variables to import.
+		do {
+			ignoreNewlines();
+			var slot = declareNamedVariable();
+
+			// Define a string constant for the variable name.
+			var variableConstant = addConstant(ObjString.newString(this.parser.vm, this.parser.previous.start));
+
+			// Load the variable from the other module.
+			emitShortArg(CODE_IMPORT_VARIABLE, variableConstant);
+
+			// Store the result in the variable here.
+			defineVariable(slot);
+		} while (match(TOKEN_COMMA));
+	}
+
+	/**
+	 * Compiles a method definition inside a class body.
+	 *
+	 * Returns `true` if it compiled successfully, or `false` if the method couldn't
+	 * be parsed.
+	 * @param classVariable
+	 */
+	function method(classVariable:Variable) {
+		// TODO: What about foreign constructors?
+		var isForeign = match(TOKEN_FOREIGN);
+		var isStatic = match(TOKEN_STATIC);
+		this.enclosingClass.inStatic = isStatic;
+		var signatureFn = rules[this.parser.current.type].method;
+
+		this.parser.nextToken();
+
+		if (signatureFn == null) {
+			error("Expect method definition.");
+			return false;
+		}
+
+		// Build the method signature.
+		var signature = signatureFromToken(SIG_GETTER);
+
+
+		this.enclosingClass.signature = signature;
+
+
+		var methodCompiler:Compiler = init(this.parser, this, true);
+
+		// Compile the method signature.
+		signatureFn(methodCompiler, signature);
+
+		if (isStatic && signature.type == SIG_INITIALIZER) {
+			error("A constructor cannot be static.");
+		}
+		
+		// Include the full signature in debug messages in stack traces.
+		var fullSignature:String = signature.toString();
+		
+		// Check for duplicate methods. Doesn't matter that it's already been
+		// defined, error will discard bytecode anyway.
+		// Check if the method table already contains this symbol
+		// trace(fullSignature.toString());
+		var methodSymbol = declareMethod(signature, fullSignature);
+
+		if (isForeign) {
+			// Define a constant for the signature.
+			emitConstant(ObjString.newString(this.parser.vm, fullSignature));
+
+			// We don't need the function we started compiling in the parameter list
+			// any more.
+			methodCompiler.parser.vm.compiler = methodCompiler.parent;
+		} else {
+			this.consume(TOKEN_LEFT_BRACE, "Expect '{' to begin method body.");
+			Grammar.finishBody(methodCompiler, signature.type == SIG_INITIALIZER);
+			methodCompiler.endCompiler(fullSignature);
+		}
+
+		// Define the method. For a constructor, this defines the instance
+		// initializer method.
+		this.defineMethod(classVariable, isStatic, methodSymbol);
+
+		if (signature.type == SIG_INITIALIZER) {
+			// Also define a matching constructor method on the metaclass.
+			signature.type = SIG_METHOD;
+			var constructorSymbol = this.signatureSymbol(signature);
+
+			createConstructor(signature, methodSymbol);
+			this.defineMethod(classVariable, true, constructorSymbol);
+		}
+
+		return true;
+	}
+
+	/**
+	 * Compiles a simple statement. These can only appear at the top-level or
+	 * within curly blocks. Simple statements exclude variable binding statements
+	 * like "var" and "class" which are not allowed directly in places like the
+	 * branches of an "if" statement.
+	 *
+	 * Unlike expressions, statements do not leave a value on the stack.
+	 */
+	function statement() {
+		
+		if (match(TOKEN_BREAK)) {
+			if (this.loop == null) {
+				error("Cannot use 'break' outside of a loop.");
+				return;
+			}
+
+			// Since we will be jumping out of the scope, make sure any locals in it
+			// are discarded first.
+			discardLocals(this.loop.scopeDepth + 1);
+
+			// Emit a placeholder instruction for the jump to the end of the body. When
+			// we're done compiling the loop body and know where the end is, we'll
+			// replace these with `CODE_JUMP` instructions with appropriate offsets.
+			// We use `CODE_END` here because that can't occur in the middle of
+			// bytecode.
+			emitJump(CODE_END);
+		} else if (match(TOKEN_FOR)) {
+			forStatement();
+		} else if (match(TOKEN_IF)) {
+			ifStatement();
+		} else if (match(TOKEN_RETURN)) {
+			// Compile the return value.
+			if (peek() == TOKEN_LINE) {
+				// Implicitly return null if there is no value.
+				emitOp(CODE_NULL);
+			} else {
+				expression();
+			}
+
+			emitOp(CODE_RETURN);
+		} else if (match(TOKEN_WHILE)) {
+			whileStatement();
+		} else if (match(TOKEN_LEFT_BRACE)) {
+			// Block statement.
+			pushScope();
+			if (Grammar.finishBlock(this)) {
+				// Block was an expression, so discard it.
+				emitOp(CODE_POP);
+			}
+			popScope();
+		} else {
+			// Expression statement.
+			expression();
+			emitOp(CODE_POP);
+		}
+	}
+
+	inline function forStatement() {
+		// A for statement like:
+		//
+		//     for (i in sequence.expression) {
+		//       System.print(i)
+		//     }
+		//
+		// Is compiled to bytecode almost as if the source looked like this:
+		//
+		//     {
+		//       var seq_ = sequence.expression
+		//       var iter_
+		//       while (iter_ = seq_.iterate(iter_)) {
+		//         var i = seq_.iteratorValue(iter_)
+		//         System.print(i)
+		//       }
+		//     }
+		//
+		// It's not exactly this, because the synthetic variables `seq_` and `iter_`
+		// actually get names that aren't valid Wren identfiers, but that's the basic
+		// idea.
+		//
+		// The important parts are:
+		// - The sequence expression is only evaluated once.
+		// - The .iterate() method is used to advance the iterator and determine if
+		//   it should exit the loop.
+		// - The .iteratorValue() method is used to get the value at the current
+		//   iterator position.
+
+		// Create a scope for the hidden local variables used for the iterator.
+		pushScope();
+		consume(TOKEN_LEFT_PAREN, "Expect '(' after 'for'.");
+		consume(TOKEN_NAME, "Expect for loop variable name.");
+
+		// Remember the name of the loop variable.
+		var name = this.parser.previous.start;
+		consume(TOKEN_IN, "Expect 'in' after loop variable.");
+		ignoreNewlines();
+		// Evaluate the sequence expression and store it in a hidden local variable.
+		// The space in the variable name ensures it won't collide with a user-defined
+		// variable.
+		expression();
+		
+		// Verify that there is space to hidden local variables.
+		// Note that we expect only two addLocal calls next to each other in the
+		// following code.
+
+		if (this.numLocals + 2 > MAX_LOCALS) {
+			error('Cannot declare more than $MAX_LOCALS variables in one scope. (Not enough space for for-loops internal variables)');
+			return;
+		}
+		var seqSlot = addLocal("seq ");
+		// Create another hidden local for the iterator object.
+		Grammar.null_(this, false);
+		var iterSlot = addLocal("iter ");
+		consume(TOKEN_RIGHT_PAREN, "Expect ')' after loop expression.");
+		var loop = {};
+		startLoop(loop);
+
+		// Advance the iterator by calling the ".iterate" method on the sequence.
+		loadLocal(seqSlot);
+		loadLocal(iterSlot);
+
+		// Update and test the iterator.
+		callMethod(1, "iterate(_)");
+		emitByteArg(CODE_STORE_LOCAL, iterSlot);
+		testExitLoop();
+
+		// Get the current value in the sequence by calling ".iteratorValue".
+		loadLocal(seqSlot);
+		loadLocal(iterSlot);
+		callMethod(1, "iteratorValue(_)");
+
+		// Bind the loop variable in its own scope. This ensures we get a fresh
+		// variable each iteration so that closures for it don't all see the same one.
+		pushScope();
+		addLocal(name);
+
+		loopBody();
+
+		// Loop variable.
+		popScope();
+
+		endLoop();
+		// Hidden variables.
+		popScope();
+	}
+
+	inline function ifStatement() {
+		// Compile the condition.
+		consume(TOKEN_LEFT_PAREN, "Expect '(' after 'if'.");
+		expression();
+		consume(TOKEN_RIGHT_PAREN, "Expect ')' after if condition.");
+		
+		// Jump to the else branch if the condition is false.
+		var ifJump = emitJump(CODE_JUMP_IF);
+		// Compile the then branch.
+		statement();
+		
+		// Compile the else branch if there is one.
+		if (match(TOKEN_ELSE)) {
+			// Jump over the else branch when the if branch is taken.
+			var elseJump = emitJump(CODE_JUMP);
+			patchJump(ifJump);
+
+			statement();
+
+			// Patch the jump over the else.
+			patchJump(elseJump);
+		} else {
+			patchJump(ifJump);
+		}
+	}
+
+	inline function whileStatement() {
+		var loop = {};
+		startLoop(loop);
+		// Compile the condition.
+		consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'.");
+		expression();
+		consume(TOKEN_RIGHT_PAREN, "Expect ')' after while condition.");
+
+		testExitLoop();
+		loopBody();
+		endLoop();
+	}
+
+	// Variables and scopes --------------------------------------------------------
+
 	/**
 	 * Emits one single-byte argument. Returns its index.
 	 * @param byte
@@ -704,7 +847,7 @@ class Compiler {
 	public function emitByte(byte:Int) {
 		fn.code.write(byte);
 		// Assume the instruction is associated with the most recently consumed token.
-		fn.debug.sourceLines.write(WrenLexer.lineCount - 1);
+		fn.debug.sourceLines.write(this.parser.previous.line);
 
 		return fn.code.count - 1;
 	}
@@ -726,10 +869,10 @@ class Compiler {
 	 * @param arg
 	 */
 	public function emitShort(arg:Int) {
+		
 		var off = (arg >> 8) & 0xff;
 		var val = arg & 0xff;
 
-		
 		emitByte(off);
 		emitByte(val);
 	}
@@ -800,27 +943,29 @@ class Compiler {
 	 * If [token] is `NULL`, uses the previously consumed token. Returns its symbol.
 	 * @param token
 	 */
-	public function declareVariable(?tokenName:String) {
-		if (tokenName == null)
-			tokenName = this.parser.last.toString();
-		var length = tokenName.length;
+	public function declareVariable(?token:Token) {
+		if (token == null)
+			token = this.parser.previous;
+		
+		var length = token.start.length;
 		if (length > MAX_VARIABLE_NAME) {
 			error('Variable name cannot be longer than ${MAX_VARIABLE_NAME} characters.');
 		}
 
+
 		// Top-level module scope.
 		if (this.scopeDepth == -1) {
 			var line = -1;
-			var symbol = this.parser.module.defineVariable(this.parser.vm, tokenName, length, Value.NULL_VAL(), line);
-
+			var symbol = this.parser.module.defineVariable(this.parser.vm, token.start, Value.NULL_VAL(), line);
+			
 			if (symbol == -1) {
 				error("Module variable is already defined.");
 			} else if (symbol == -2) {
 				error("Too many module variables defined.");
 			} else if (symbol == -3) {
-				error('Variable \'${tokenName}\' referenced before this definition (first use at line $line).');
-			}
-
+				error('Variable \'${token.start}\' referenced before this definition (first use at line $line).');
+			}	
+			
 			return symbol;
 		}
 
@@ -832,7 +977,7 @@ class Compiler {
 			// Once we escape this scope and hit an outer one, we can stop.
 			if (local.depth < this.scopeDepth)
 				break;
-			if (local.length == length && local.name == tokenName) {
+			if (local.length == length && local.name == token.start) {
 				error("Variable is already declared in this scope.");
 				return i;
 			}
@@ -843,11 +988,16 @@ class Compiler {
 			error('Cannot declare more than ${MAX_LOCALS} variables in one scope.');
 			return -1;
 		}
-
-		return addLocal(tokenName);
+		
+		return addLocal(token.start);
 	}
 
+	/**
+	 * Parses a name token and declares a variable in the current scope with that
+	 * name. Returns its slot.
+	 */
 	public function declareNamedVariable() {
+		consume(TOKEN_NAME, "Expect variable name.");
 		return declareVariable();
 	}
 
@@ -865,17 +1015,64 @@ class Compiler {
 		// See if the class has already declared method with this signature.
 		var classInfo = this.enclosingClass;
 		var methods = classInfo.inStatic ? classInfo.staticMethods : classInfo.methods;
+
 		for (i in 0...methods.count) {
 			if (methods.data[i] == symbol) {
 				var staticPrefix = classInfo.inStatic ? "static " : "";
 				error('Class ${classInfo.name.value.join("")} already defines a ${staticPrefix}method \'${name}\'.');
 			}
 		}
+
 		methods.write(symbol);
 		return symbol;
 	}
 
-	public function defineMethod(classVariable:Variable, isStatic:Bool, symbol:Int) {}
+	public function defineMethod(classVariable:Variable, isStatic:Bool, symbol:Int) {
+		// Load the class. We have to do this for each method because we can't
+		// keep the class on top of the stack. If there are static fields, they
+		// will be locals above the initial variable slot for the class on the
+		// stack. To skip past those, we just load the class each time right before
+		// defining a method.
+		loadVariable(classVariable);
+
+		// Define the method.
+		var instruction:Code = isStatic ? CODE_METHOD_STATIC : CODE_METHOD_INSTANCE;
+		emitShortArg(instruction, symbol);
+	}
+
+	/**
+	 * Creates a matching constructor method for an initializer with [signature]
+	 * and [initializerSymbol].
+	 *
+	 * Construction is a two-stage process in Wren that involves two separate
+	 * methods. There is a static method that allocates a new instance of the class.
+	 *
+	 * It then invokes an initializer method on the new instance, forwarding all of
+	 * the constructor arguments to it.
+	 *
+	 * The allocator method always has a fixed implementation:
+	 *
+	 * 		CODE_CONSTRUCT - Replace the class in slot 0 with a new instance of it.
+	 * 		CODE_CALL      - Invoke the initializer on the new instance.
+	 *
+	 * This creates that method and calls the initializer with [initializerSymbol].
+	 * @param signature
+	 * @param initializerSymbold
+	 */
+	function createConstructor(signature:Signature, initializerSymbol) {
+		var methodCompiler = init(this.parser, this, true);
+
+		// Allocate the instance.
+		methodCompiler.emitOp(this.enclosingClass.isForeign ? CODE_FOREIGN_CONSTRUCT : CODE_CONSTRUCT);
+
+		// Run its initializer.
+		methodCompiler.emitShortArg(CODE_CALL_0 + signature.arity, initializerSymbol);
+
+		// Return the instance.
+		methodCompiler.emitOp(CODE_RETURN);
+
+		methodCompiler.endCompiler("");
+	}
 
 	/**
 	 * Gets the symbol for a method with [signature].
@@ -1024,7 +1221,6 @@ class Compiler {
 
 		// See if it's a local variable in the immediately enclosing function.
 		var local = this.parent.resolveLocal(name);
-
 		if (local != -1) {
 			// Mark the local as an upvalue so we know to close it when it goes out of
 			// scope.
@@ -1061,7 +1257,6 @@ class Compiler {
 		var variable:Variable = new Variable(resolveLocal(name), SCOPE_LOCAL);
 		if (variable.index != -1)
 			return variable;
-
 		// Tt's not a local, so guess that it's an upvalue.
 		variable.scope = SCOPE_UPVALUE;
 		variable.index = findUpvalue(name);
@@ -1078,7 +1273,6 @@ class Compiler {
 		var variable:Variable = resolveNonmodule(name);
 		if (variable.index != -1)
 			return variable;
-
 		variable.scope = SCOPE_MODULE;
 		variable.index = this.parser.module.variableNames.find(name);
 		return variable;
@@ -1117,7 +1311,7 @@ class Compiler {
 	}
 
 	public function endCompiler(debugName:String) {
-		if (this.parser.errors.length >= 1) {
+		if (this.parser.hasError) {
 			this.parser.vm.compiler = this.parent;
 			return null;
 		}
@@ -1149,7 +1343,6 @@ class Compiler {
 		// Pop this compiler off the stack.
 		this.parser.vm.compiler = this.parent;
 
-		
 		#if WREN_DEBUG_DUMP_COMPILED_CODE
 		this.parser.vm.dumpCode(this.fn);
 		#end
@@ -1167,9 +1360,9 @@ class Compiler {
 		if (jump > MAX_JUMP)
 			error("Too much code to jump over.");
 
-		this.fn.code.data.set(offset,  (jump >> 8) & 0xff);
+		this.fn.code.data.set(offset, (jump >> 8) & 0xff);
 
-		this.fn.code.data.set(offset + 1,  jump & 0xff);
+		this.fn.code.data.set(offset + 1, jump & 0xff);
 	}
 
 	public function loadCoreVariable(name:String) {
@@ -1184,21 +1377,71 @@ class Compiler {
 		if (source.charCodeAt(0) == 239 && source.charCodeAt(1) == 187 && source.charCodeAt(2) == 191) {
 			source = source.substring(3);
 		}
-
-		var parser = new WrenParser(byte.ByteData.ofString(source), module.name.value.join(""));
+		var parser = new WrenParser(null, module.name != null ? module.name.value.join("") : null);
 		parser.vm = vm;
 		parser.module = module;
 		parser.source = source;
 
+		parser.tokenStart = source;
+		parser.currentChar =  source;
+		parser.currentLine = 1;
+		parser.numParens = 0;
+
+		// Zero-init the current token. This will get copied to previous when
+		// advance() is called below.
+		parser.current.type = TOKEN_ERROR;
+		parser.current.start = "";
+		parser.current.length = 0;
+		parser.current.line = 0;
+		parser.current.value = Value.UNDEFINED_VAL();
+
+		// Ignore leading newlines.
+		parser.skipNewLines = true;
+		parser.printErrors = printErrors;
+		parser.hasError = false;
+
+		// Read the first token.
+		parser.nextToken();
+
+		var numExistingVariables = module.variables.count;
+
 		var compiler = init(parser, null, false);
-		
-		// start parsing
-		parser.parse();
-		if(parser.errors.length > 0){
-			compiler.error();
+
+		compiler.ignoreNewlines();
+
+		if (isExpression) {
+			compiler.expression();
+			compiler.consume(TOKEN_EOF, "Expect end of expression.");
+		} else {
+			while (!compiler.match(TOKEN_EOF)) {
+				compiler.definition();
+
+				// If there is no newline, it must be the end of file on the same line.
+				if (!compiler.matchLine()) {
+					compiler.consume(TOKEN_EOF, "Expect end of file.");
+					break;
+				}
+			}
+
+			compiler.emitOp(CODE_END_MODULE);
 		}
 
 		compiler.emitOp(CODE_RETURN);
+
+		// See if there are any implicitly declared module-level variables that never
+		// got an explicit definition. They will have values that are numbers
+		// indicating the line where the variable was first used.
+		
+		for (i in numExistingVariables...parser.module.variables.count) {
+			if (parser.module.variables.data[i].IS_NUM()) {
+				// Synthesize a token for the original use site.
+				parser.previous.type = TOKEN_NAME;
+				parser.previous.start = parser.module.variableNames.data[i].value.join("");
+				parser.previous.length = parser.module.variableNames.data[i].length;
+				parser.previous.line = Std.int(parser.module.variables.data[i].AS_NUM());
+				compiler.error("Variable is used but not defined.");
+			}
+		}
 
 		return compiler.endCompiler("(script)");
 	}
@@ -1237,18 +1480,20 @@ class Compiler {
 		}
 	}
 
-	public function signatureFromToken(name:String, type:SignatureType) {
+	public function signatureFromToken(type:SignatureType) {
 		var signature:Signature = {};
-		signature.name = name;
-		signature.length = signature.name.length;
+		// Get the token for the method name.
+		var token = this.parser.previous;
+		signature.name = token.start;
+		signature.length = token.start.length;
 		signature.type = type;
 		signature.arity = 0;
-
+	
 		if (signature.length > MAX_METHOD_NAME) {
 			error('Method names cannot be longer than $MAX_METHOD_NAME characters.');
 			signature.length = MAX_METHOD_NAME;
 		}
-
+		
 		return signature;
 	}
 
@@ -1270,7 +1515,7 @@ class Compiler {
 	/**
 	 * Ends the current innermost loop. Patches up all jumps and breaks now that
 	 * we know where the end of the loop is.
-	 * 
+	 *
 	 */
 	public function endLoop() {
 		// We don't check for overflow here since the forward jump over the loop body
@@ -1300,9 +1545,31 @@ class Compiler {
 
 	public function loopBody() {
 		this.loop.body = this.fn.code.count;
+		statement();
 	}
 
-	public function namedCall(name:String, canAssign:Bool, code:Code) {}
+	public static function isLocalName(name:String):Bool {
+		return Utils.isLocalName(name);
+	}
 
-	public static function isLocalName(name:String):Bool {return Utils.isLocalName(name);}
+	inline function callMethod(numArgs:Int, name:String) {
+		var symbol = methodSymbol(name);
+		emitShortArg(cast(CODE_CALL_0 + numArgs, Code), symbol);
+	}
+
+	inline function callSignature(instruction:Code, signature:Signature) {
+		var symbol = signatureSymbol(signature);
+		emitShortArg(cast(instruction + signature.arity, Code), symbol);
+		if (instruction == CODE_SUPER_0) {
+			// Super calls need to be statically bound to the class's superclass. This
+			// ensures we call the right method even when a method containing a super
+			// call is inherited by another subclass.
+			//
+			// We bind it at class definition time by storing a reference to the
+			// superclass in a constant. So, here, we create a slot in the constant
+			// table and store NULL in it. When the method is bound, we'll look up the
+			// superclass then and store it in the constant slot.
+			emitShort(addConstant(Value.NULL_VAL()));
+		}
+	}
 }

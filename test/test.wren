@@ -206,8 +206,8 @@ var arr = [
   3
 ]
 
-
-System.print("%(interpolate)")
+System.print("[%(join(", "))]")
+System.print("[%("interpolate")]")
 
 var f = Fn.new{|a, b, c|
   System.print("%(a), %(b), %(c)")

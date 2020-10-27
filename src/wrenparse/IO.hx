@@ -79,7 +79,7 @@ abstract SymbolTable(StringBuffer) from StringBuffer to StringBuffer {
 
     public function find(v:String) {
         for(i in 0...this.count){
-           var found = this.data[i].value[v.length - 1] == v; //UInt8Array.fromArray(.slice(0, v.length - 1)).getData().bytes.toString() == v;
+           var found = this.data[i].value.join("") == v;
             if((v.length == this.data[i].length) && found){
                 return i;
             }
@@ -133,6 +133,7 @@ abstract ByteBuffer(TBBuffer) from TBBuffer to TBBuffer {
             var capacity = wrenPowerOf2Ceil(this.count + count);
             // todo: VM reallocate  
             this.capacity = capacity;
+            this.data.resize(this.capacity);
         }
 
         var i = 0;

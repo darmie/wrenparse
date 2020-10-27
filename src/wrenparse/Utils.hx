@@ -1,5 +1,6 @@
 package wrenparse;
 
+import haxe.io.Bytes;
 import haxe.Int64;
 import polygonal.ds.ArrayList;
 
@@ -51,7 +52,71 @@ class Utils {
 	public static inline function isLocalName(name:String) {
 		return name.charCodeAt(0) >= 'a'.charCodeAt(0) && name.charCodeAt(0) <= 'z'.charCodeAt(0);
 	}
+
+	public static function getEnclosingClassCompiler(compiler:Compiler) {
+		while (compiler != null) {
+			if (compiler.enclosingClass != null)
+				return compiler;
+			compiler = compiler.parent;
+		}
+		return null;
+	}
+
+	public static function getEnclosingClass(compiler:Compiler) {
+		compiler = getEnclosingClassCompiler(compiler);
+		return compiler == null ? null : compiler.enclosingClass;
+	}
+
+
+	public static inline function utf8EncodeNumBytes(value:Int){
+		Utils.ASSERT(value >= 0, "Cannot encode a negative value.");
+
+		if (value <= 0x7f) return 1;
+		if (value <= 0x7ff) return 2;
+		if (value <= 0xffff) return 3;
+		if (value <= 0x10ffff) return 4;
+		return 0;
+	}
+
+	public static function utf8Encode(value:Int, bytes:Bytes){
+		if (value <= 0x7f)
+			{
+			  // Single byte (i.e. fits in ASCII).
+			  bytes.set(0, value & 0x7f);
+			  return 1;
+			}
+			else if (value <= 0x7ff)
+			{
+			  // Two byte sequence: 110xxxxx 10xxxxxx.
+			  bytes.set(0, 0xc0 | ((value & 0x7c0) >> 6));
+			  bytes.set(1, 0x80 | (value & 0x3f));
+			  return 2;
+			}
+			else if (value <= 0xffff)
+			{
+			  // Three byte sequence: 1110xxxx 10xxxxxx 10xxxxxx.
+			  bytes.set(0, 0xe0 | ((value & 0xf000) >> 12));
+			  bytes.set(1, 0x80 | ((value & 0xfc0) >> 6));
+			  bytes.set(2, 0x80 | (value & 0x3f));
+			  return 3;
+			}
+			else if (value <= 0x10ffff)
+			{
+			  // Four byte sequence: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx.
+			  bytes.set(0, 0xf0 | ((value & 0x1c0000) >> 18));
+			  bytes.set(1, 0x80 | ((value & 0x3f000) >> 12));
+			  bytes.set(2, 0x80 | ((value & 0xfc0) >> 6));
+			  bytes.set(3, 0x80 | (value & 0x3f));
+			  return 4;
+			}
+
+			UNREACHABLE();
+			return 0;
+	}
 }
+
+
+
 
 @:forward(size, free, resize)
 abstract FixedArray<T>(ArrayList<T>) from ArrayList<T> to ArrayList<T> {

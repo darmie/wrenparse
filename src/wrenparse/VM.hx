@@ -9,6 +9,7 @@ import wrenparse.IO.Buffer;
 import polygonal.ds.ArrayList;
 import wrenparse.objects.*;
 import wrenparse.Compiler;
+import wrenparse.Data;
 import wrenparse.IO.SymbolTable;
 
 enum ErrorType {
@@ -25,6 +26,7 @@ enum WrenInterpretResult {
 	WREN_RESULT_SUCCESS;
 	WREN_RESULT_COMPILE_ERROR;
 	WREN_RESULT_RUNTIME_ERROR;
+	WREN_RESULT_DEBUG;
 }
 
 typedef WrenHandle = {
@@ -249,6 +251,7 @@ class VM {
 	public var listClass:ObjClass;
 	public var mapClass:ObjClass;
 	public var fiberClass:ObjClass;
+	public var objectClass:ObjClass;
 
 	public var grayCapacity:Int;
 	public var grayCount:Int;
@@ -275,17 +278,9 @@ class VM {
 		this.tempRoots = [];
 		this.modules = new ObjMap(this);
 		this.methodNames = new SymbolTable(this);
-		initializeCore();
+		Core.init(this);
 	}
-
-	function initializeCore() {
-		var coreModule = new ObjModule(this, null);
-		pushRoot(coreModule);
-		// The core module's key is null in the module map.
-		this.modules.set(this, Value.NULL_VAL(), coreModule.OBJ_VAL());
-		popRoot();
-	}
-
+	
 	public static function initConfiguration(config:VMConfig) {
 		config.reallocateFn = null;
 		config.resolveModuleFn = null;
@@ -304,8 +299,8 @@ class VM {
 		var nameValue:Value = Value.NULL_VAL();
 
 		if (moduleName != null) {
-			nameValue = new ObjString(this, moduleName).OBJ_VAL();
-			pushRoot(nameValue.as.obj);
+			nameValue = ObjString.newString(this, moduleName);
+			pushRoot(nameValue.AS_OBJ());
 		}
 		var closure:ObjClosure = compileInModule(nameValue, code, isExpression, printErrors);
 		if (moduleName != null)
@@ -323,7 +318,7 @@ class VM {
 		var module = getModule(name);
 
 		if (module == null) {
-			module = new ObjModule(this, cast name.AS_OBJ());
+			module = new ObjModule(this, name.AS_STRING());
 			// It's possible for the wrenMapSet below to resize the modules map,
 			// and trigger a GC while doing so. When this happens it will collect
 			// the module we've just created. Once in the map it is safe.
@@ -336,8 +331,7 @@ class VM {
 			// Implicitly import the core module.
 			var coreModule:ObjModule = getModule(Value.NULL_VAL());
 			for (i in 0...coreModule.variables.count) {
-				coreModule.defineVariable(this, coreModule.variableNames.data[i].value[0], coreModule.variableNames.data[i].length,
-					coreModule.variables.data[i], null);
+				module.defineVariable(this, coreModule.variableNames.data[i].value.join(""), coreModule.variables.data[i], null);
 			}
 		}
 
@@ -355,14 +349,14 @@ class VM {
 	}
 
 	public function pushRoot(obj:Obj) {
-		Utils.ASSERT(obj != null, "Can't root NULL.");
-		Utils.ASSERT(numTempRoots < WREN_MAX_TEMP_ROOTS, "Too many temporary roots.");
-		tempRoots[numTempRoots++] = obj;
+		// Utils.ASSERT(obj != null, "Can't root NULL.");
+		// Utils.ASSERT(numTempRoots < WREN_MAX_TEMP_ROOTS, "Too many temporary roots.");
+		// tempRoots[numTempRoots++] = obj;
 	}
 
 	public function popRoot() {
-		Utils.ASSERT(numTempRoots > 0, "No temporary roots to release.");
-		numTempRoots--;
+		// Utils.ASSERT(numTempRoots > 0, "No temporary roots to release.");
+		// numTempRoots--;
 	}
 
 	/**
@@ -390,9 +384,10 @@ class VM {
 
 		var i = 0;
 		var lastLine = -1;
-		var offset = 0;
-		while (offset != -1) {
-			offset = dumpInstruction(fn, i, lastLine);
+
+		while (true) {
+			var offset = dumpInstruction(fn, i, null);
+			if(offset == -1) break;
 			i += offset;
 		}
 	}
@@ -502,7 +497,6 @@ class VM {
 				CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 | CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16:
 				{
 					var numArgs = bytecode.get(i - 1) - CODE_CALL_0;
-
 					var symbol = READ_SHORT();
 					printf('CALL_${numArgs} $symbol \'${methodNames.data[symbol].value.join("")}\'');
 				}
@@ -1389,10 +1383,10 @@ class VM {
 		popRoot(); // closure.
 
 		this.apiStack = null;
-		#if WREN_INTERPRET
+		#if !WREN_DEBUG_DUMP_COMPILED_CODE
 		return runInterpreter(fiber);
 		#else
-		return WREN_RESULT_SUCCESS;
+		return WREN_RESULT_DEBUG;
 		#end
 	}
 
@@ -1589,8 +1583,8 @@ class VM {
 					CODE_CALL_9 | CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 | CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16:
 					{
 						// Add one for the implicit receiver argument.
-						var numArgs = instruction - CODE_CALL_0 + 1
-							; // numArgs
+						// numArgs
+						var numArgs = instruction - CODE_CALL_0 + 1; 
 						var symbol = READ_SHORT(); // symbol
 						// The receiver is the first argument.
 						var args = fiber.stackTop.pointer(-numArgs);
@@ -1606,8 +1600,7 @@ class VM {
 					CODE_SUPER_9 | CODE_SUPER_10 | CODE_SUPER_11 | CODE_SUPER_12 | CODE_SUPER_13 | CODE_SUPER_14 | CODE_SUPER_15 | CODE_SUPER_16:
 					{
 						// Add one for the implicit receiver argument.
-						var numArgs = instruction - CODE_SUPER_0 + 1
-							; // numArgs
+						var numArgs = instruction - CODE_SUPER_0 + 1; // numArgs
 						var symbol = READ_SHORT(); // symbol
 						// The receiver is the first argument.
 						var args = fiber.stackTop.pointer(-numArgs);
