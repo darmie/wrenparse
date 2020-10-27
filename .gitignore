@@ -10,3 +10,7 @@ DS_Store
 ide.hxml
 wrenparse.zip
 hashlink
+
+src/wrenparse/WrenParser_.hx
+src/wrenparse/WrenLexer_.hx
+src/wrenparse/Data_.hx
