@@ -1,6 +1,10 @@
 package wrenparse;
 
 
+import haxe.CallStack;
+import haxe.io.BytesOutput;
+import haxe.io.Bytes;
+import haxe.io.UInt16Array;
 import polygonal.ds.tools.mem.ByteMemory;
 import haxe.io.UInt8Array;
 import byte.ByteData;
@@ -101,7 +105,7 @@ typedef IntBuffer = Buffer<Int>;
 // typedef ByteBuffer = Buffer<Int>;
 
 typedef TBBuffer = {
-    data:ByteMemory,
+    data:Bytes,
     count:Int,
     capacity:Int,
     vm:VM
@@ -111,19 +115,20 @@ typedef TBBuffer = {
 abstract ByteBuffer(TBBuffer) from TBBuffer to TBBuffer {
     public inline function new(vm:VM) {
         this = {
-            data: new ByteMemory(256),
+            data: Bytes.alloc(1),
             count: 0,
-            capacity: 0,
+            capacity: 1,
             vm:vm
         };
     }
 
     public inline function clear(){
         // todo: vm.reallocate()
+        this.data = null;
         this = {
-            data: new ByteMemory(256),
+            data:  Bytes.alloc(1),
             count: 0,
-            capacity: 0,
+            capacity: 1,
             vm:this.vm
         };
     }
@@ -133,17 +138,36 @@ abstract ByteBuffer(TBBuffer) from TBBuffer to TBBuffer {
             var capacity = wrenPowerOf2Ceil(this.count + count);
             // todo: VM reallocate  
             this.capacity = capacity;
-            this.data.resize(this.capacity);
+            // this.data.resize(this.capacity);
+            var buf = Bytes.alloc(this.capacity);
+            
+            for(i in 0...this.data.length){
+                buf.set(i, this.data.get(i));
+            }
+            this.data = buf;
         }
 
-        var i = 0;
-        while(i < count){
-           this.data.set(this.count++, data);
-           i++;
-        }
+        this.data.fill(this.count++, 1, data);
+        // trace(CallStack.toString(CallStack.callStack()));
     }
 
     public inline function write(data:Int) {
         fill(data, 1);
+    }
+
+    public inline function writeShort(data:Int) {
+        if(this.capacity < this.count + 2){
+            var capacity = wrenPowerOf2Ceil(this.count + 2);
+            // todo: VM reallocate  
+            this.capacity = capacity;
+            // this.data.resize(this.capacity);
+            var buf = Bytes.alloc(this.capacity);
+            
+            for(i in 0...this.data.length){
+                buf.set(i, this.data.get(i));
+            }
+            this.data = buf;
+        }
+        this.data.setUInt16(this.count, data);
     }
 }

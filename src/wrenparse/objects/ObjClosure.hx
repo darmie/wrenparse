@@ -1,5 +1,9 @@
 package wrenparse.objects;
 
+import haxe.io.Bytes;
+import haxe.io.UInt16Array;
+import polygonal.ds.tools.mem.ByteMemory;
+import polygonal.ds.ArrayList;
 import wrenparse.Pointer.DataPointer;
 import wrenparse.Value.ValuePointer;
 import wrenparse.Utils.FixedArray;
@@ -51,7 +55,7 @@ class CallFrame {
      * Instruction Pointer to the current (really next-to-be-executed) instruction in the
      * function's bytecode.
      */
-    public var ip:DataPointer;
+    public var ip:Bytes;
 
     /**
      * The closure being executed.
@@ -65,5 +69,7 @@ class CallFrame {
      */
     public var stackStart:ValuePointer;
 
-    public function new() {}
+    public function new() {
+        stackStart = new ValuePointer(new ArrayList());
+    }
 }

@@ -1,5 +1,6 @@
 package wrenparse.objects;
 
+import haxe.io.UInt16Array;
 import wrenparse.Pointer.DataPointer;
 import polygonal.ds.ArrayList;
 import wrenparse.Value;
@@ -92,6 +93,9 @@ class ObjFiber extends Obj {
 		this.stackCapacity = stackCapacity;
 
 		this.frames = new haxe.ds.Vector(INITIAL_CALL_FRAMES);
+		for(i in 0...INITIAL_CALL_FRAMES){
+			this.frames.set(i, new CallFrame());
+		}
 		this.frameCapacity = INITIAL_CALL_FRAMES;
 		this.numFrames = 0;
 
@@ -104,6 +108,7 @@ class ObjFiber extends Obj {
 		if (closure != null) {
 			// Initialize the first call frame.
 			// wrenAppendCallFrame(vm, fiber, closure, fiber->stack);
+			this.appendCallFrame(vm, closure, this.stack);
 
 			// The first slot always holds the closure.
 			this.stackTop.setValue(0, closure.OBJ_VAL());
@@ -121,14 +126,21 @@ class ObjFiber extends Obj {
 		// Grow the call frame array if needed.
 		if (numFrames + 1 > frameCapacity) {
 			var max = frameCapacity * 2;
+			var old = frames;
 			frames = new Vector(frameCapacity); // (CallFrame*)wrenReallocate(vm, fiber->frames, sizeof(CallFrame) * fiber->frameCapacity, sizeof(CallFrame) * max);
+			for(i in 0...frames.length){
+				frames.set(i, old[i]);
+			}
 			frameCapacity = max;
 		}
 		// Grow the stack if needed.
+		
 		var stackSize = (stackTop.sub(stack));
+	
 		var needed = stackSize + closure.maxSlots;
+
 		ensureStack(vm, needed);
-		appendCallFrame(vm, closure, stackTop.pointer(-numArgs));
+		appendCallFrame(vm, closure, stackTop.pointer(vm.stackOffset-numArgs));
 	}
 
 	public function ensureStack(vm:VM, needed:Int) {
@@ -137,7 +149,7 @@ class ObjFiber extends Obj {
 
 		var capacity = Utils.wrenPowerOf2Ceil(needed);
 		var oldStack = stack;
-		stack = new ValuePointer(new ArrayList(capacity, stack.arr.toArray()));
+		stack = new ValuePointer(oldStack.arr);
 		stackCapacity = capacity;
 
 		// If the reallocation moves the stack, then we need to recalculate every
@@ -146,23 +158,23 @@ class ObjFiber extends Obj {
 		// calculated because pointer subtraction is only well-defined within a
 		// single array, hence the slightly redundant-looking arithmetic below.
 
-		if (stack != oldStack) {
-			// Top of the stack.
-			if (vm.apiStack.gte(oldStack) && vm.apiStack.lte(this.stackTop)) {
-				vm.apiStack = this.stack.pointer(vm.apiStack.sub(oldStack));
-			}
-			// Stack pointer for each call frame.
-			for (i in 0...this.numFrames) {
-				var frame:CallFrame = this.frames[i];
-				frame.stackStart = this.stack.pointer(frame.stackStart.sub(oldStack));
-			}
-			var upvalue = openUpvalues.value();
-			while (upvalue != null) {
-				upvalue.value = this.stack.pointer(upvalue.value.sub(oldStack));
-				upvalue = cast upvalue.next;
-			}
-			this.stackTop = this.stack.pointer(this.stackTop.sub(oldStack));
-		}
+		// if (stack.arr != oldStack.arr) {
+		// 	// Top of the stack.
+		// 	if (vm.apiStack.gte(oldStack) && vm.apiStack.lte(this.stackTop)) {
+		// 		vm.apiStack = this.stack.pointer(vm.apiStack.sub(oldStack));
+		// 	}
+		// 	// Stack pointer for each call frame.
+		// 	for (i in 0...this.numFrames) {
+		// 		var frame:CallFrame = this.frames[i];
+		// 		frame.stackStart = this.stack.pointer(frame.stackStart.sub(oldStack));
+		// 	}
+		// 	var upvalue = openUpvalues.value();
+		// 	while (upvalue != null) {
+		// 		upvalue.value = this.stack.pointer(upvalue.value.sub(oldStack));
+		// 		upvalue = cast upvalue.next;
+		// 	}
+		// 	this.stackTop = this.stack.pointer(this.stackTop.sub(oldStack));
+		// }
 	}
 
 	public function appendCallFrame(vm:VM, closure:ObjClosure, stackStart:ValuePointer) {
@@ -171,7 +183,7 @@ class ObjFiber extends Obj {
 		var frame = frames[numFrames++];
 		frame.stackStart = stackStart;
 		frame.closure = closure;
-		frame.ip = new DataPointer(closure.code.data);
+		frame.ip = closure.code.data;
 	}
 
 	public function closeUpvalues(last:ValuePointer) {

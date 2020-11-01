@@ -1,5 +1,11 @@
 package wrenparse;
 
+import haxe.io.BytesBuffer;
+import haxe.io.BytesData;
+import haxe.io.Bytes;
+import haxe.io.UInt16Array;
+import polygonal.ds.tools.mem.ByteMemory;
+import haxe.CallStack;
 import wrenparse.Pointer.DataPointer;
 import haxe.Int32;
 import wrenparse.objects.ObjClass.Method;
@@ -220,6 +226,7 @@ typedef VMConfig = {
 	?userData:Dynamic
 }
 
+@:allow(wrenparse.objects.ObjFiber)
 class VM {
 	public static var instance:VM;
 
@@ -280,7 +287,7 @@ class VM {
 		this.methodNames = new SymbolTable(this);
 		Core.init(this);
 	}
-	
+
 	public static function initConfiguration(config:VMConfig) {
 		config.reallocateFn = null;
 		config.resolveModuleFn = null;
@@ -293,6 +300,19 @@ class VM {
 		config.minHeapSize = 1024 * 1024;
 		config.heapGrowthPercent = 50;
 		config.userData = null;
+	}
+
+	public function free() {
+		// Free all of the GC objects.
+		var obj = this.first;
+		while (obj != null) {
+			var next = obj.next;
+			//   wrenFreeObj(vm, obj);
+			obj = null;
+			obj = next;
+		}
+
+		methodNames.clear();
 	}
 
 	public function compileSource(moduleName:String, code:String, isExpression:Bool = false, printErrors:Bool = true):ObjClosure {
@@ -349,14 +369,14 @@ class VM {
 	}
 
 	public function pushRoot(obj:Obj) {
-		// Utils.ASSERT(obj != null, "Can't root NULL.");
-		// Utils.ASSERT(numTempRoots < WREN_MAX_TEMP_ROOTS, "Too many temporary roots.");
-		// tempRoots[numTempRoots++] = obj;
+		Utils.ASSERT(obj != null, "Can't root NULL.");
+		Utils.ASSERT(numTempRoots < WREN_MAX_TEMP_ROOTS, "Too many temporary roots.");
+		tempRoots[numTempRoots++] = obj;
 	}
 
 	public function popRoot() {
-		// Utils.ASSERT(numTempRoots > 0, "No temporary roots to release.");
-		// numTempRoots--;
+		Utils.ASSERT(numTempRoots > 0, "No temporary roots to release.");
+		numTempRoots--;
 	}
 
 	/**
@@ -387,7 +407,8 @@ class VM {
 
 		while (true) {
 			var offset = dumpInstruction(fn, i, null);
-			if(offset == -1) break;
+			if (offset == -1)
+				break;
 			i += offset;
 		}
 	}
@@ -410,8 +431,9 @@ class VM {
 			return bytecode.get(i++);
 		}
 		function READ_SHORT() {
-			i += 2;
-			return (bytecode.get(i - 2) << 8) | bytecode.get(i - 1);
+			i +=2;
+			var v = (bytecode.get(i - 2) << 8) | bytecode.get(i - 1);
+			return v & 0xff;
 		}
 		function BYTE_INSTRUCTION(name:String) {
 			buf.add('$name ${READ_BYTE()}\n');
@@ -426,9 +448,9 @@ class VM {
 				printf("POP\n");
 			case CODE_CONSTANT:
 				{
+					// trace(bytecode.get(i-1), bytecode.get(i+1));
 					var constant = READ_SHORT();
 					buf.add('CONSTANT ${constant} \'');
-					// trace(constant, fn.constants.data[constant]);
 
 					buf.add(fn.constants.data[constant].dump());
 
@@ -497,6 +519,7 @@ class VM {
 				CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 | CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16:
 				{
 					var numArgs = bytecode.get(i - 1) - CODE_CALL_0;
+					
 					var symbol = READ_SHORT();
 					printf('CALL_${numArgs} $symbol \'${methodNames.data[symbol].value.join("")}\'');
 				}
@@ -1138,6 +1161,7 @@ class VM {
 		if (config.errorFn == null)
 			return;
 		var fiber = this.fiber;
+
 		if (fiber.error.IS_STRING()) {
 			config.errorFn(this, WREN_ERROR_RUNTIME, null, -1, fiber.error.AS_CSTRING());
 		} else {
@@ -1159,8 +1183,8 @@ class VM {
 			if (fn.module.name == null)
 				continue;
 			// -1 because IP has advanced past the instruction that it just executed.
-			var dataPointer:DataPointer = new DataPointer(fn.code.data);
-			var line = fn.debug.sourceLines.data[frame.ip.sub(dataPointer.pointer(-1))];
+			var dataPointer = fn.code.data;
+			var line = fn.debug.sourceLines.data[frame.ip.length - dataPointer.length - 1];
 			config.errorFn(this, WREN_ERROR_RUNTIME, fn.module.name.value.join(""), line, fn.debug.name);
 			i--;
 		}
@@ -1179,16 +1203,17 @@ class VM {
 	 */
 	public function createClass(numFields:Int, module:ObjModule) {
 		// Pull the name and superclass off the stack.
-		var name = fiber.stackTop.value(-2);
-		var superclass = fiber.stackTop.value(-1);
+		var name = fiber.stackTop.value(stackOffset-2);
+		var superclass = fiber.stackTop.value(stackOffset - 1); 
 		// We have two values on the stack and we are going to leave one, so discard
 		// the other slot.
-		fiber.stackTop.drop();
+		stackOffset--;
+		// fiber.stackTop.drop();
 		fiber.error = validateSuperclass(name, superclass, numFields);
 		if (fiber.hasError())
 			return;
 		var classObj = ObjClass.newClass(this, superclass.AS_CLASS(), numFields, name.AS_STRING());
-		fiber.stackTop.setValue(-1, classObj.OBJ_VAL());
+		fiber.stackTop.setValue(stackOffset - 1, classObj.OBJ_VAL());
 		if (numFields == -1)
 			classObj.bindForeignClass(this, module);
 	}
@@ -1211,8 +1236,9 @@ class VM {
 		var className = classObj.name.value.join("");
 		if (methodType == CODE_METHOD_STATIC)
 			classObj = classObj.classObj;
-		var method:ObjClass.Method = null;
+		var method:Method = null;
 		if (methodValue.IS_STRING()) {
+			trace(methodValue.AS_STRING().value);
 			var name = methodValue.AS_CSTRING();
 			method = new Method(METHOD_FOREIGN);
 			method.as.foreign = findForeignMethod(module.name.value.join(""), className, methodType == CODE_METHOD_STATIC, name);
@@ -1224,7 +1250,6 @@ class VM {
 		} else {
 			method = new Method(METHOD_BLOCK);
 			method.as.closure = methodValue.AS_CLOSURE();
-
 			// Patch up the bytecode now that we know the superclass.
 			classObj.bindMethodCode(method.as.closure);
 		}
@@ -1355,6 +1380,9 @@ class VM {
 			superclass == this.listClass
 			|| superclass == this.mapClass
 			|| superclass == this.rangeClass
+			|| superclass == this.numClass
+			|| superclass == this.nullClass
+			|| superclass == this.boolClass
 			|| superclass == this.stringClass) {
 			return ObjString.format(this, "Class '@' cannot inherit from built-in class '@'.", [name, superclass.name.OBJ_VAL()]);
 		}
@@ -1371,6 +1399,26 @@ class VM {
 		}
 
 		return Value.NULL_VAL();
+	}
+
+	function loadModule(name:Value, source:String):ObjFiber {
+		// See if the module has already been loaded.
+		var module = getModule(name);
+		if (module == null) {
+			module = new ObjModule(this, name.AS_STRING());
+
+			// Store it in the VM's module registry so we don't load the same module
+			// multiple times.
+			this.modules.set(this, name, module.OBJ_VAL());
+
+			// Implicitly import the core module.
+			var coreModule:ObjModule = getModule(Value.NULL_VAL());
+			for (i in 0...coreModule.variables.count) {
+				module.defineVariable(this, coreModule.variableNames.data[i].value.join(""), coreModule.variables.data[i], null);
+			}
+		}
+
+		return null;
 	}
 
 	public function interpret(module:String, source:String) {
@@ -1390,6 +1438,9 @@ class VM {
 		#end
 	}
 
+	var stackOffset = 0;
+	var ipOffset = 0;
+
 	public function runInterpreter(fiber:ObjFiber):WrenInterpretResult {
 		// Remember the current fiber so we can find it if a GC happens.
 		this.fiber = fiber;
@@ -1399,33 +1450,34 @@ class VM {
 		var frame:ObjClosure.CallFrame = null;
 
 		var stackStart:ValuePointer = null;
-		var ip:DataPointer = null;
+		var ip:Bytes = null;
 		var fn:ObjFn = null;
 
 		function PUSH(value:Value) {
-			fiber.stackTop.inc();
-			fiber.stackTop.setValue(0, value);
+			fiber.stackTop.setValue(stackOffset++, value);
 		}
 		function POP() {
-			return fiber.stackTop.dec();
+			return fiber.stackTop.value(--stackOffset);
 		}
 		function DROP() {
-			return fiber.stackTop.drop();
+			return stackOffset--;
 		}
 		function PEEK() {
-			return fiber.stackTop.value(-1);
+			var v = fiber.stackTop.value(stackOffset - 1);
+			return v;
 		}
 		function PEEK2() {
-			return fiber.stackTop.value(-2);
+			return fiber.stackTop.value(stackOffset - 2);
 		}
 		function READ_BYTE() {
-			return ip.value(1);
+			return ip.get(ipOffset++);
 		}
 
 		function READ_SHORT() {
-			ip.inc();
-			ip.setValue(0, 2);
-			return (ip.value(-2) << 8) | ip.value(-1);
+			ipOffset += 2;
+			var v = (ip.get(ipOffset - 2) << 8) | ip.get(ipOffset - 1);
+			// trace(v);
+			return v & 0xff;
 		}
 		// Use this before a CallFrame is pushed to store the local variables back
 		// into the current one.
@@ -1438,16 +1490,29 @@ class VM {
 				frame = fiber.frames[fiber.numFrames - 1];
 				stackStart = frame.stackStart;
 				ip = frame.ip;
+				ipOffset = 0;
 				fn = cast frame.closure;
 			} while (false);
 		}
 
 		LOAD_FRAME();
-
+	
 		var instruction:Code;
+
+		function DISPATCH(){
+			instruction = READ_BYTE();
+		}
+
 		while (true) {
+			if(fiber.hasError()){
+				break;
+			}
+
 			function completeCall(numArgs:Int, symbol:Int, args:ValuePointer, classObj:ObjClass) {
 				var method:Method = null;
+				
+				// trace(classObj.name.value.join(""), symbol, classObj.methods.data[symbol].type, methodNames.data[symbol].value);
+			
 				// If the class's method table doesn't include the symbol, bail.
 				if (symbol >= classObj.methods.count || (method = classObj.methods.data[symbol]).type == METHOD_NONE) {
 					classObj.methodNotFound(this, symbol);
@@ -1461,7 +1526,7 @@ class VM {
 						LOAD_FRAME();
 					} while (false);
 				}
-
+				
 				return switch method.type {
 					case METHOD_PRIMITIVE:
 						{
@@ -1469,7 +1534,8 @@ class VM {
 								// The result is now in the first arg slot. Discard the other
 								// stack slots.
 								// fiber->stackTop -= numArgs - 1;
-								fiber.stackTop = fiber.stackTop.pointer(-(numArgs - 1));
+								// stackOffset -= numArgs - 1;
+								fiber.stackTop = fiber.stackTop.pointer(numArgs - 1);
 							} else {
 								// An error, fiber switch, or call frame change occurred.
 								STORE_FRAME();
@@ -1537,7 +1603,11 @@ class VM {
 				}
 			}
 
-			switch (instruction = READ_BYTE()) {
+		
+
+			instruction = READ_BYTE();
+			
+			switch (instruction) {
 				case CODE_LOAD_LOCAL_0 | CODE_LOAD_LOCAL_1 | CODE_LOAD_LOCAL_2 | CODE_LOAD_LOCAL_3 | CODE_LOAD_LOCAL_4 | CODE_LOAD_LOCAL_5 |
 					CODE_LOAD_LOCAL_6 | CODE_LOAD_LOCAL_7 | CODE_LOAD_LOCAL_8:
 					{
@@ -1577,18 +1647,21 @@ class VM {
 					stackStart.setValue(READ_BYTE(), PEEK());
 					continue;
 				case CODE_CONSTANT:
-					PUSH(fn.constants.data[READ_SHORT()]);
+					var offset = READ_SHORT();
+					var c = fn.constants.data[offset];
+					PUSH(c);
 					continue;
 				case CODE_CALL_0 | CODE_CALL_1 | CODE_CALL_2 | CODE_CALL_3 | CODE_CALL_4 | CODE_CALL_5 | CODE_CALL_6 | CODE_CALL_7 | CODE_CALL_8 |
 					CODE_CALL_9 | CODE_CALL_10 | CODE_CALL_11 | CODE_CALL_12 | CODE_CALL_13 | CODE_CALL_14 | CODE_CALL_15 | CODE_CALL_16:
 					{
 						// Add one for the implicit receiver argument.
 						// numArgs
-						var numArgs = instruction - CODE_CALL_0 + 1; 
+						var numArgs = instruction - CODE_CALL_0 + 1;
 						var symbol = READ_SHORT(); // symbol
+
 						// The receiver is the first argument.
-						var args = fiber.stackTop.pointer(-numArgs);
-						var classObj = getClassInline(args.value(0));
+						var args = fiber.stackTop.pointer(stackOffset-numArgs);
+						var classObj = getClassInline(args.value());
 						var res = completeCall(numArgs, symbol, args, classObj);
 						if (res == null) {
 							continue;
@@ -1603,7 +1676,7 @@ class VM {
 						var numArgs = instruction - CODE_SUPER_0 + 1; // numArgs
 						var symbol = READ_SHORT(); // symbol
 						// The receiver is the first argument.
-						var args = fiber.stackTop.pointer(-numArgs);
+						var args = fiber.stackTop.pointer(stackOffset-numArgs);
 						// The superclass is stored in a constant.
 						var classObj = fn.constants.data[READ_SHORT()].AS_CLASS();
 						var res = completeCall(numArgs, symbol, args, classObj);
@@ -1627,12 +1700,15 @@ class VM {
 					}
 				case CODE_LOAD_MODULE_VAR:
 					{
-						PUSH(fn.module.variables.data[READ_SHORT()]);
+						var offset = READ_SHORT();
+						var v = fn.module.variables.data[offset];
+						PUSH(v);
 						continue;
 					}
 				case CODE_STORE_MODULE_VAR:
 					{
-						fn.module.variables.data[READ_SHORT()] = PEEK();
+						var offset = READ_SHORT();
+						fn.module.variables.data[offset] = PEEK();
 						continue;
 					}
 				case CODE_STORE_FIELD_THIS:
@@ -1668,15 +1744,14 @@ class VM {
 				case CODE_JUMP:
 					{
 						var offset = READ_SHORT();
-						ip.inc();
-						ip.setValue(0, offset);
+						ipOffset +=offset;
 						continue;
 					}
 				case CODE_LOOP:
 					{
 						// Jump back to the top of the loop.
 						var offset = READ_SHORT();
-						ip.setValue(-1, offset);
+						ipOffset -=offset;
 						continue;
 					}
 				case CODE_JUMP_IF:
@@ -1684,8 +1759,7 @@ class VM {
 						var offset = READ_SHORT();
 						var condition = POP();
 						if (condition.IS_FALSE() || condition.IS_NULL())
-							ip.inc();
-						ip.setValue(0, offset);
+							ipOffset +=offset;
 						continue;
 					}
 				case CODE_AND:
@@ -1694,8 +1768,7 @@ class VM {
 						var condition = PEEK();
 						if (condition.IS_FALSE() || condition.IS_NULL()) {
 							// Short-circuit the right hand side.
-							ip.inc();
-							ip.setValue(0, offset);
+							ipOffset +=offset;
 						} else {
 							// Discard the condition and evaluate the right hand side.
 							DROP();
@@ -1712,15 +1785,14 @@ class VM {
 							DROP();
 						} else {
 							// Short-circuit the right hand side.
-							ip.inc();
-							ip.setValue(0, offset);
+							ipOffset +=offset;
 						}
 						continue;
 					}
 				case CODE_CLOSE_UPVALUE:
 					{
 						// Close the upvalue for the local if we have one.
-						fiber.closeUpvalues(fiber.stackTop.pointer(-1));
+						fiber.closeUpvalues(fiber.stackTop.pointer(stackOffset-1));
 						DROP();
 						continue;
 					}
@@ -1733,11 +1805,14 @@ class VM {
 						// If the fiber is complete, end it.
 						if (fiber.numFrames == 0) {
 							// See if there's another fiber to return to. If not, we're done.
+							
 							if (fiber.caller == null) {
 								// Store the final result value at the beginning of the stack so the
 								// Haxe API can get it.
 								fiber.stack.setValue(0, result);
 								fiber.stackTop = fiber.stack.pointer(1);
+								stackOffset = 0;
+								ipOffset = 0;
 								return WREN_RESULT_SUCCESS;
 							}
 
@@ -1752,10 +1827,13 @@ class VM {
 							// Store the result of the block in the first slot, which is where the
 							// caller expects it.
 							stackStart.setValue(0, result);
-
 							// Discard the stack slots for the call frame (leaving one slot for the
 							// result).
-							fiber.stackTop = frame.stackStart.pointer(1);
+
+							stackOffset = 0;
+							var arr = new ArrayList();
+							arr.set(0, result);
+							fiber.stackTop = new ValuePointer(arr);
 						}
 						LOAD_FRAME();
 						continue;
@@ -1776,16 +1854,18 @@ class VM {
 					{
 						// Create the closure and push it on the stack before creating upvalues
 						// so that it doesn't get collected.
-						var func = fn.constants.data[READ_SHORT()].AS_FUN();
+						var offset = READ_SHORT();
+						var func = fn.constants.data[offset].AS_FUN();
 						var closure = ObjClosure.fromFn(this, func);
 						PUSH(closure.OBJ_VAL());
+						
 						// Capture upvalues, if any.
 						for (i in 0...func.numUpvalues) {
 							var isLocal:Null<Int> = READ_BYTE();
 							var index = READ_BYTE();
 							if (isLocal != null) {
 								// Make an new upvalue to close over the parent's local variable.
-								closure.upValues[i] = fiber.captureUpvalues(this, frame.stackStart.pointer(index));
+								closure.upValues[i] = fiber.captureUpvalues(this, frame.stackStart.pointer(stackOffset+index));
 							} else {
 								// Use the same upvalue as the current call frame.
 								closure.upValues[i] = frame.closure.upValues[index];
@@ -1906,11 +1986,15 @@ class VM {
 					{
 						// A CODE_END should always be preceded by a CODE_RETURN. If we get here,
 						// the compiler generated wrong code.
+						
 						Utils.UNREACHABLE();
 					}
+				case _: break;
 			}
+			
 		}
 
+		trace(instruction);
 		// We should only exit this function from an explicit return from CODE_RETURN
 		// or a runtime error.
 		Utils.UNREACHABLE();

@@ -19,6 +19,7 @@ import wrenparse.Compiler.MAX_UPVALUES;
  * upvalue itself. That way, it can have a longer lifetime than the stack
  * variable.
  * */
+@:keepSub
 class ObjUpvalue extends Obj {
 
     /**

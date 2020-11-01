@@ -109,7 +109,8 @@ class Token {
      */
     public var value:Value;
 
-    public function new(){}
+    public function new(){
+	}
 }
 
 
@@ -195,23 +196,23 @@ typedef Loop = {
 /**
  * The different signature syntaxes for different kinds of methods.
  */
-enum SignatureType {
+enum abstract SignatureType(Int) from Int to Int {
 	// A name followed by a (possibly empty) parenthesized parameter list. Also
 	// used for binary operators.
-	SIG_METHOD;
+	var SIG_METHOD = 0;
 
 	// Just a name. Also used for unary operators.
-	SIG_GETTER;
+	var SIG_GETTER;
 	// A name followed by "=".
-	SIG_SETTER;
+	var SIG_SETTER;
 	// A square bracketed parameter list.
-	SIG_SUBSCRIPT;
+	var SIG_SUBSCRIPT;
 	// A square bracketed parameter list followed by "=".
-	SIG_SUBSCRIPT_SETTER;
+	var SIG_SUBSCRIPT_SETTER;
 	// A constructor initializer function. This has a distinct signature to
 	// prevent it from being invoked directly outside of the constructor on the
 	// metaclass.
-	SIG_INITIALIZER;
+	var SIG_INITIALIZER;
 }
 
 typedef TSignature = {
@@ -267,7 +268,7 @@ abstract Signature(TSignature) from TSignature to TSignature {
 					name += parameterList(this.arity, "(", ")");
 				}
 		}
-		name += String.fromCharCode(0);
+		// name += String.fromCharCode(0);
 		return name;
 	}
 }
@@ -489,6 +490,87 @@ enum abstract Code(Int) from Int to Int {
 	var CODE_IMPORT_VARIABLE;
 	var CODE_END;
 
+	public inline function toString():String {
+		return switch this {
+			case CODE_AND: "CODE_AND";
+			case CODE_CALL_0: "CODE_CALL_0";
+			case CODE_CALL_1: "CODE_CALL_1";
+			case CODE_CALL_2: "CODE_CALL_2";
+			case CODE_CALL_3: "CODE_CALL_3";
+			case CODE_CALL_4: "CODE_CALL_4";
+			case CODE_CALL_5: "CODE_CALL_5";
+			case CODE_CALL_6: "CODE_CALL_6";
+			case CODE_CALL_7: "CODE_CALL_7";
+			case CODE_CALL_8: "CODE_CALL_8";
+			case CODE_CALL_9: "CODE_CALL_9";
+			case CODE_CALL_10: "CODE_CALL_10";
+			case CODE_CALL_11: "CODE_CALL_11";
+			case CODE_CALL_12: "CODE_CALL_12";
+			case CODE_CALL_13: "CODE_CALL_13";
+			case CODE_CALL_14: "CODE_CALL_14";
+			case CODE_CALL_15: "CODE_CALL_15";
+			case CODE_CALL_16: "CODE_CALL_16";
+			case CODE_SUPER_0: "CODE_SUPER_0";
+			case CODE_SUPER_1: "CODE_SUPER_1";
+			case CODE_SUPER_2: "CODE_SUPER_2";
+			case CODE_SUPER_3: "CODE_SUPER_3";
+			case CODE_SUPER_4: "CODE_SUPER_4";
+			case CODE_SUPER_5: "CODE_SUPER_5";
+			case CODE_SUPER_6: "CODE_SUPER_6";
+			case CODE_SUPER_7: "CODE_SUPER_7";
+			case CODE_SUPER_8: "CODE_SUPER_8";
+			case CODE_SUPER_9: "CODE_SUPER_9";
+			case CODE_SUPER_10: "CODE_SUPER_10";
+			case CODE_SUPER_11: "CODE_SUPER_11";
+			case CODE_SUPER_12: "CODE_SUPER_12";
+			case CODE_SUPER_13: "CODE_SUPER_13";
+			case CODE_SUPER_14: "CODE_SUPER_14";
+			case CODE_SUPER_15: "CODE_SUPER_15";
+			case CODE_SUPER_16: "CODE_SUPER_16";
+			case CODE_CONSTANT: "CODE_CONSTANT";
+			case CODE_CONSTRUCT: "CODE_CONSTRUCT";
+			case CODE_CLASS: "CODE_CLASS";
+			case CODE_CLOSE_UPVALUE: "CODE_CLOSE_UPVALUE";
+			case CODE_CLOSURE:"CODE_CLOSURE";
+			case CODE_END: "CODE_END";
+			case CODE_END_MODULE:"CODE_END_MODULE";
+			case CODE_LOAD_MODULE_VAR:"CODE_LOAD_MODULE_VAR";
+			case CODE_LOAD_FIELD: "CODE_LOAD_FIELD";
+			case CODE_LOAD_FIELD_THIS:"CODE_LOAD_FIELD_THIS";
+			case CODE_NULL: "CODE_NULL";
+			case CODE_FALSE: "CODE_FALSE";
+			case CODE_TRUE: "CODE_TRUE";
+			case CODE_FOREIGN_CLASS: "CODE_FOREIGN_CLASS";
+			case CODE_LOAD_LOCAL_0: "CODE_LOAD_LOCAL_0";
+			case CODE_LOAD_LOCAL_1: "CODE_LOAD_LOCAL_1";
+			case CODE_LOAD_LOCAL_2: "CODE_LOAD_LOCAL_2";
+			case CODE_LOAD_LOCAL_3: "CODE_LOAD_LOCAL_3";
+			case CODE_LOAD_LOCAL_4: "CODE_LOAD_LOCAL_4";
+			case CODE_LOAD_LOCAL_5: "CODE_LOAD_LOCAL_5";
+			case CODE_LOAD_LOCAL_6: "CODE_LOAD_LOCAL_6";
+			case CODE_LOAD_LOCAL_7: "CODE_LOAD_LOCAL_7";
+			case CODE_LOAD_LOCAL_8: "CODE_LOAD_LOCAL_8";
+			case CODE_LOAD_LOCAL:"CODE_LOAD_LOCAL";
+			case CODE_LOOP: "CODE_LOOP";
+			case CODE_JUMP:"CODE_JUMP";
+			case CODE_JUMP_IF:"CODE_JUMP_IF";
+			case CODE_OR:"CODE_OR";
+			case CODE_POP:"CODE_POP";
+			case CODE_RETURN:"CODE_RETURN";
+			case CODE_FOREIGN_CONSTRUCT:"CODE_FOREIGN_CONSTRUCT";
+			case CODE_STORE_FIELD:"CODE_STORE_FIELD";
+			case CODE_STORE_FIELD_THIS:"CODE_STORE_FIELD_THIS";
+			case CODE_STORE_LOCAL:"CODE_STORE_LOCAL";
+			case CODE_STORE_MODULE_VAR:"CODE_STORE_MODULE_VAR";
+			case CODE_STORE_UPVALUE:"CODE_STORE_UPVALUE";
+			case CODE_IMPORT_MODULE:"CODE_IMPORT_MODULE";
+			case CODE_IMPORT_VARIABLE:"CODE_IMPORT_VARIABLE";
+			case CODE_METHOD_INSTANCE: "CODE_METHOD_INSTANCE";
+			case CODE_METHOD_STATIC: "CODE_METHOD_STATIC";
+			case _: return '$this';
+		}
+	}
+
 	public inline function stackEffect() {
 		return switch this {
 			case CODE_CONSTANT | CODE_NULL | CODE_FALSE | CODE_TRUE | CODE_LOAD_LOCAL_0 | CODE_LOAD_LOCAL_1 | CODE_LOAD_LOCAL_2 | CODE_LOAD_LOCAL_3 |
@@ -536,7 +618,7 @@ enum abstract Code(Int) from Int to Int {
 
 
 typedef GrammarFn = (compiler:Compiler, canAssign:Bool) -> Void;
-typedef SignatureFn = (compiler:Compiler, signature:Signature) -> Void;
+typedef SignatureFn = (compiler:Compiler, signature:Signature) -> Signature;
 
 enum abstract Precedence(Int) from Int to Int {
 	var PREC_NONE = 0;
@@ -558,6 +640,14 @@ enum abstract Precedence(Int) from Int to Int {
 	var PREC_UNARY; // unary - ! ~
 	var PREC_CALL; // . () []
 	var PREC_PRIMARY;
+
+	@:to public inline function toInt():Int {
+		return this;
+	}
+
+	@:op(A <= B) public inline function lte(o:Precedence){
+		return this <= o.toInt();
+	}
 }
 
 typedef GrammarRule = {
@@ -646,7 +736,7 @@ abstract GrammarRules(Map<TokenType, GrammarRule>) from Map<TokenType, GrammarRu
             TOKEN_CLASS         => UNUSED(),
             TOKEN_CONSTRUCT     => { method:Grammar.constructorSignature, precedence:PREC_NONE },
             TOKEN_ELSE          => UNUSED(),
-            TOKEN_FALSE         => PREFIX(Grammar.boolean),
+            TOKEN_FALSE         => PREFIX(Grammar._boolean),
             TOKEN_FOR           => UNUSED(),
             TOKEN_FOREIGN       => UNUSED(),
             TOKEN_IF            => UNUSED(),
@@ -658,7 +748,7 @@ abstract GrammarRules(Map<TokenType, GrammarRule>) from Map<TokenType, GrammarRu
             TOKEN_STATIC        => UNUSED(),
             TOKEN_SUPER         => PREFIX(Grammar.super_),
             TOKEN_THIS          => PREFIX(Grammar.this_),
-            TOKEN_TRUE          => PREFIX(Grammar.boolean),
+            TOKEN_TRUE          => PREFIX(Grammar._boolean),
             TOKEN_VAR           => UNUSED(),
             TOKEN_WHILE         => UNUSED(),
             TOKEN_FIELD         => PREFIX(Grammar.field),

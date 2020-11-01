@@ -61,6 +61,7 @@ class Test {
 		if(res == WREN_RESULT_COMPILE_ERROR){
 		
 		}
+		vm.free();
 		return res;
 	}
 }

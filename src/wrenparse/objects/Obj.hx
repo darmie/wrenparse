@@ -79,19 +79,19 @@ class Obj {
 			case OBJ_CLASS:
 				return ('[class ${cast (this, ObjClass).name.value.join("")} $this]');
 			case OBJ_CLOSURE:
-				return ('[closure $this]');
+				return ('[closure ${Type.getClassName(Type.getClass(this))}]');
 			case OBJ_FIBER:
-				return ('[fiber $this]');
+				return ('[fiber ${Type.getClassName(Type.getClass(this))}]');
 			case OBJ_FN:
-				return ('[fn $this]');
+				return ('[fn  ${Type.getClassName(Type.getClass(this))}]');
 			case OBJ_FOREIGN:
-				return ('[foreign $this]');
+				return ('[foreign ${Type.getClassName(Type.getClass(this))}]');
 			case OBJ_INSTANCE:
-				return ('[instance $this]');
+				return ('[instance ${Type.getClassName(Type.getClass(this))}]');
 			case OBJ_LIST:
-				return ('[list $this]');
+				return ('[list ${Type.getClassName(Type.getClass(this))}]');
 			case OBJ_MAP:
-				return ('[map $this]');
+				return ('[map ${Type.getClassName(Type.getClass(this))}]');
 			case OBJ_MODULE:
 				return ('[module $this]');
 			case OBJ_RANGE:

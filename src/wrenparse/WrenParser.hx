@@ -1,5 +1,9 @@
 package wrenparse;
 
+import haxe.io.UInt8Array;
+import haxe.io.BytesData;
+import haxe.io.BytesBuffer;
+import polygonal.ds.tools.mem.ByteMemory;
 import wrenparse.objects.ObjString;
 import haxe.io.BytesOutput;
 import haxe.io.Bytes;
@@ -81,7 +85,6 @@ class WrenParser {
 	public function new(source:byte.ByteData = null, moduleName:String = "main") {
 		this.moduleName = moduleName;
 		this.current = new Token();
-		this.previous = new Token();
 		this.parens = [];
 	}
 
@@ -171,14 +174,15 @@ class WrenParser {
 	 */
 	inline function makeToken(type:TokenType) {
         this.current = new Token();
-        this.current.type = type;
-        this.current.start = this.tokenStart.substring(this.tokenOffset, this.currentOffset);
+		this.current.type = type;
+		// trace(this.current.type);
+		this.current.start = this.tokenStart.substring(this.tokenOffset, this.currentOffset);
 		this.current.length = this.tokenStart.length;
         this.current.line = this.currentLine;
 		// Make line tokens appear on the line containing the "\n".
 		if (type == TOKEN_LINE){
             this.current.line--;
-        }
+		}
 	}
 
 	/**
@@ -265,7 +269,7 @@ class WrenParser {
 		makeNumber();
 	}
 
-	inline function makeNumber() {
+	function makeNumber() {
 		try {
             this.current.value = Value.NUM_VAL(Std.parseFloat(this.tokenStart.substring(this.tokenOffset, this.currentOffset)));
 		} catch (e:haxe.Exception) {
@@ -276,7 +280,7 @@ class WrenParser {
 		makeToken(TOKEN_NUMBER);
 	}
 
-	inline function readNumber() {
+	function readNumber() {
 		while (isDigit(peekChar())){
             nextChar();
         }
@@ -303,7 +307,6 @@ class WrenParser {
 			while (isDigit(peekChar()))
 				nextChar();
 		}
-        
 		makeNumber();
 	}
 
@@ -361,18 +364,17 @@ class WrenParser {
 		return value;
 	}
 
-	inline function readUnicodeEscape(string:BytesOutput, length:Int) {
+	inline function readUnicodeEscape(string:ByteBuffer, length:Int) {
 		var value = readHexEscape(length, "Unicode");
 		// Grow the buffer enough for the encoded result.
 		var numBytes = Utils.utf8EncodeNumBytes(value);
 		if (numBytes != 0) {
-			// string.fill(0, 1, numBytes);
-			for (i in 0...numBytes) {
-				string.writeByte(0);
-			}
-			var b = string.getBytes().sub(0, string.length - numBytes);
-			Utils.utf8Encode(value, b);
-			string.writeBytes(b, 0, b.length);
+			string.fill(0, numBytes);
+			// var b = ByteMemory.toArray(string.data, numBytes, string.count);
+			Utils.utf8Encode(value, string);
+			// for(i in 0...string.count){
+			// 	string.write(b[i]);
+			// }
 		}
 	}
 
@@ -380,7 +382,7 @@ class WrenParser {
 	 * Finishes lexing a string literal.
 	 */
 	function readString() {
-		var string = new BytesOutput();
+		var string = new ByteBuffer(this.vm);
 		var type = TOKEN_STRING;
 
 		while (true) {
@@ -393,7 +395,7 @@ class WrenParser {
 
 				// Don't consume it if it isn't expected. Keeps us from reading past the
 				// end of an unterminated string.
-                this.currentChar = this.source.charAt(this.currentOffset--);
+                this.currentOffset--;
 				break;
 			}
 			if (c == "%") {
@@ -408,38 +410,38 @@ class WrenParser {
 
 				lexError('Interpolation may only nest ${Compiler.MAX_INTERPOLATION_NESTING} levels deep.');
 			}
-
+			
 			if (c == "\\") {
 				switch (nextChar()) {
 					case '"':
-						string.writeString('"');
+						string.write('"'.charCodeAt(0));
 					case '\\':
-						string.writeString('\\');
+						string.write('\\'.charCodeAt(0));
 					case "%":
-						string.writeString('%');
+						string.write('%'.charCodeAt(0));
 					case '0':
-						string.writeString(eof);
+						string.write(eof.charCodeAt(0));
 					case 'a':
-						string.writeString(String.fromCharCode(0x07));
+						string.write(0x07);
 					case 'b':
-						string.writeString(String.fromCharCode(0x08));
+						string.write(0x08);
 					case 'f':
-						string.writeString(String.fromCharCode(0x0C));
+						string.write(0x0C);
 					case 'n':
-						string.writeString('\n');
+						string.write('\n'.charCodeAt(0));
 					case 'r':
-						string.writeString('\r');
+						string.write('\r'.charCodeAt(0));
 					case 't':
-						string.writeString('\t');
+						string.write('\t'.charCodeAt(0));
 					case 'u':
 						readUnicodeEscape(string, 4);
 					case 'U':
 						readUnicodeEscape(string, 8);
 					case 'v':
-						string.writeString(String.fromCharCode(0x0B));
+						string.write(0x0B);
 					case 'x':
 						{
-							string.writeString(String.fromCharCode(readHexEscape(2, "byte")));
+							string.write(readHexEscape(2, "byte"));
 						}
 					case _:
 						{
@@ -447,11 +449,15 @@ class WrenParser {
 						}
 				}
 			} else {
-				string.writeString(c);
+				if(this.current.start == "(" || this.current.start == ")"){
+					continue;
+				}
+				string.write(c.charCodeAt(0));
 			}
 		}
-
-		this.current.value = ObjString.newString(vm, string.getBytes().getString(0, string.length));
+		var s = UInt8Array.fromBytes(string.data).getData().bytes.toString();
+		this.current.value = ObjString.newString(vm, s);
+		string.clear();
 		makeToken(type);
 	}
 
@@ -469,14 +475,12 @@ class WrenParser {
 		while (peekChar() != eof) {
             this.tokenOffset = this.currentOffset;
 			var c = nextChar();
-			
 			switch c {
 				case '(':
 					{
 						// If we are inside an interpolated expression, count the unmatched "(".
 						if (this.numParens > 0)
                             this.parens[this.numParens - 1]++;
-                        
                         makeToken(TOKEN_LEFT_PAREN);
 						return;
 					}

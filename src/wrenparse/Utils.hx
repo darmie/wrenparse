@@ -1,5 +1,7 @@
 package wrenparse;
 
+import wrenparse.IO.ByteBuffer;
+import haxe.io.BytesBuffer;
 import haxe.io.Bytes;
 import haxe.Int64;
 import polygonal.ds.ArrayList;
@@ -78,35 +80,35 @@ class Utils {
 		return 0;
 	}
 
-	public static function utf8Encode(value:Int, bytes:Bytes){
+	public static function utf8Encode(value:Int, bytes:ByteBuffer){
 		if (value <= 0x7f)
 			{
 			  // Single byte (i.e. fits in ASCII).
-			  bytes.set(0, value & 0x7f);
+			  bytes.write(value & 0x7f);
 			  return 1;
 			}
 			else if (value <= 0x7ff)
 			{
 			  // Two byte sequence: 110xxxxx 10xxxxxx.
-			  bytes.set(0, 0xc0 | ((value & 0x7c0) >> 6));
-			  bytes.set(1, 0x80 | (value & 0x3f));
+			  bytes.write(0xc0 | ((value & 0x7c0) >> 6));
+			  bytes.write(0x80 | (value & 0x3f));
 			  return 2;
 			}
 			else if (value <= 0xffff)
 			{
 			  // Three byte sequence: 1110xxxx 10xxxxxx 10xxxxxx.
-			  bytes.set(0, 0xe0 | ((value & 0xf000) >> 12));
-			  bytes.set(1, 0x80 | ((value & 0xfc0) >> 6));
-			  bytes.set(2, 0x80 | (value & 0x3f));
+			  bytes.write(0xe0 | ((value & 0xf000) >> 12));
+			  bytes.write(0x80 | ((value & 0xfc0) >> 6));
+			  bytes.write(0x80 | (value & 0x3f));
 			  return 3;
 			}
 			else if (value <= 0x10ffff)
 			{
 			  // Four byte sequence: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx.
-			  bytes.set(0, 0xf0 | ((value & 0x1c0000) >> 18));
-			  bytes.set(1, 0x80 | ((value & 0x3f000) >> 12));
-			  bytes.set(2, 0x80 | ((value & 0xfc0) >> 6));
-			  bytes.set(3, 0x80 | (value & 0x3f));
+			  bytes.write(0xf0 | ((value & 0x1c0000) >> 18));
+			  bytes.write(0x80 | ((value & 0x3f000) >> 12));
+			  bytes.write(0x80 | ((value & 0xfc0) >> 6));
+			  bytes.write(0x80 | (value & 0x3f));
 			  return 4;
 			}
 

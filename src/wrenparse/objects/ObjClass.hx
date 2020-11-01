@@ -1,5 +1,6 @@
 package wrenparse.objects;
 
+import haxe.CallStack;
 import wrenparse.Data.Code;
 import wrenparse.IO.Buffer;
 import wrenparse.objects.ObjClosure;
@@ -72,6 +73,7 @@ class ObjClass extends Obj {
 		this.numFields = numFields;
 		this.name = name;
 
+
 		super(vm, this.type, classObj);
 
 		vm.pushRoot(this);
@@ -90,7 +92,7 @@ class ObjClass extends Obj {
 			if (superClass.numFields != 0)
 				throw "A foreign class cannot inherit from a class with fields.";
 		}
-
+		
 		// Inherit methods from its superclass.
 		for (i in 0...superClass.methods.count) {
 			bindMethod(vm, i, superClass.methods.data[i]);
@@ -100,7 +102,7 @@ class ObjClass extends Obj {
 	public static function newClass(vm:VM, superclass:ObjClass, numFields:Int, name:ObjString):ObjClass {
 		// Create the metaclass
 		var metaclassName = ObjString.format(vm, "@ metaclass", [name.OBJ_VAL()]);
-		vm.pushRoot(metaclassName.as.obj);
+		vm.pushRoot(metaclassName.AS_OBJ());
 		var metaclass:ObjClass = new ObjClass(vm, numFields, name);
 		metaclass.classObj = vm.classClass;
 		vm.popRoot();
@@ -127,10 +129,9 @@ class ObjClass extends Obj {
 		// Make sure the buffer is big enough to contain the symbol's index.
 		if (symbol >= this.methods.count) {
 			var noMethod:Method = new Method(METHOD_NONE);
-
 			this.methods.fill(noMethod, symbol - this.methods.count + 1);
 		}
-
+		
 		this.methods.data[symbol] = method;
 	}
 
@@ -150,14 +151,13 @@ class ObjClass extends Obj {
 					CODE_SUPER_9 | CODE_SUPER_10 | CODE_SUPER_11 | CODE_SUPER_12 | CODE_SUPER_13 | CODE_SUPER_14 | CODE_SUPER_15 | CODE_SUPER_16:
 					{
 						// Fill in the constant slot with a reference to the superclass.
-						var constant = (fn.code.data.get(ip + 3) << 8) | fn.code.data.get(ip + 4);
+						var constant = ((fn.code.data.get(ip + 3) << 8) | fn.code.data.get(ip + 4)) & 0xff;
 						fn.constants.data[constant] = this.superClass.OBJ_VAL();
 					}
 				case CODE_CLOSURE:
 					{
 						// Bind the nested closure too.
-
-						var constant = (fn.code.data.get(ip + 1) << 8) | fn.code.data.get(ip + 2);
+						var constant = ((fn.code.data.get(ip + 1) << 8) | fn.code.data.get(ip + 2)) & 0xff;
 						bindMethodCode(fn.constants.data[constant].AS_FUN());
 						break;
 					}
@@ -205,6 +205,8 @@ class ObjClass extends Obj {
 	 * @param symbold
 	 */
 	public function methodNotFound(vm:VM, symbol:Int) {
-		vm.fiber.error = ObjString.format(vm, "@ does not implement '$'.", [classObj.name.OBJ_VAL(), vm.methodNames.data[symbol].value.join("")]);
+		// trace(CallStack.toString(CallStack.callStack()));
+		// vm.fiber.error = ObjString.format(vm, "@ does not implement '$'.", [classObj.name.OBJ_VAL(), vm.methodNames.data[symbol].value.join("")]);
+		vm.fiber.error = ObjString.CONST_STRING(vm, '${classObj.name.value.join("")} does not implement ${vm.methodNames.data[symbol].value.join("")}');
 	}
 }

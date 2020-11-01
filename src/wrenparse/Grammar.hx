@@ -3,6 +3,8 @@ package wrenparse;
 import wrenparse.objects.ObjString;
 import wrenparse.Data;
 
+using StringTools;
+
 @:allow(wrenparse.Compiler)
 class Grammar {
 	static function bareName(compiler:Compiler, canAssign:Bool, variable:Variable) {
@@ -85,16 +87,6 @@ class Grammar {
 	}
 
 	/**
-	 * A parenthesized expression.
-	 * @param compiler
-	 * @param canAssign
-	 */
-	public static function grouping(compiler:Compiler, canAssign:Bool) {
-		compiler.expression();
-		compiler.consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
-	}
-
-	/**
 	 * A list literal.
 	 * @param compiler
 	 * @param canAssign
@@ -156,7 +148,7 @@ class Grammar {
 		compiler.consume(TOKEN_RIGHT_BRACKET, "Expect '}' after map elements.");
 	}
 
-	public static function boolean(compiler:Compiler, canAssign:Bool) {
+	public static function _boolean(compiler:Compiler, canAssign:Bool) {
 		compiler.emitOp(compiler.parser.previous.type == TOKEN_FALSE ? CODE_FALSE : CODE_TRUE);
 	}
 
@@ -166,13 +158,53 @@ class Grammar {
 	 * @param canAssign
 	 */
 	public static function literal(compiler:Compiler, canAssign:Bool) {
-        if(compiler.parser.isDigit(compiler.parser.previous.start)){
-            compiler.parser.previous.value = Value.NUM_VAL(Std.parseFloat(compiler.parser.previous.start));
-        } else {
-            compiler.parser.previous.value = ObjString.newString(compiler.parser.vm, compiler.parser.previous.start);
-        }
+		if(compiler.parser.previous.type == TOKEN_NUMBER){
+			compiler.parser.previous.value = Value.NUM_VAL(Std.parseFloat(compiler.parser.previous.start));
+			compiler.emitConstant(compiler.parser.previous.value);
+		} else if(compiler.parser.previous.type == TOKEN_STRING) {
+			if(compiler.parser.previous.start.startsWith('"')){
+				compiler.parser.previous.start = compiler.parser.previous.start.substr(1);
+				
+			}
+			if(compiler.parser.previous.start.endsWith('"')){
+				compiler.parser.previous.start = compiler.parser.previous.start.substring(0, compiler.parser.previous.start.length - 1);
+			}
+			compiler.parser.previous.value = ObjString.CONST_STRING(compiler.parser.vm, compiler.parser.previous.start);
+			compiler.emitConstant(compiler.parser.previous.value);
+		} else if(compiler.parser.previous.type == TOKEN_INTERPOLATION){
+			if(compiler.parser.previous.start.startsWith('"')){
+				compiler.parser.previous.start = compiler.parser.previous.start.substr(1);
+			}
+			if(compiler.parser.previous.start.startsWith('%(')){
+				compiler.parser.previous.start = compiler.parser.previous.start.substr(3);
+			}
+			if(compiler.parser.previous.start.startsWith(')')){
+				compiler.parser.previous.start = compiler.parser.previous.start.substr(1);
+			}
+			
+			if(compiler.parser.previous.start.endsWith('%(')){
+				compiler.parser.previous.start = compiler.parser.previous.start.substring(0, compiler.parser.previous.start.length - 2);
+			}
+			if(compiler.parser.previous.start.endsWith('"')){
+				compiler.parser.previous.start = compiler.parser.previous.start.substring(0, compiler.parser.previous.start.length - 1);
+			}
 
-		compiler.emitConstant(compiler.parser.previous.value);
+			if(compiler.parser.previous.start != ''){
+				compiler.parser.previous.value = ObjString.CONST_STRING(compiler.parser.vm, compiler.parser.previous.start);
+				compiler.emitConstant(compiler.parser.previous.value);
+			}
+			
+		}
+	}
+
+	/**
+	 * A parenthesized expression.
+	 * @param compiler
+	 * @param canAssign
+	 */
+	 public static function grouping(compiler:Compiler, canAssign:Bool) {
+		compiler.expression();
+		compiler.consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
 	}
 
 	/**
@@ -195,7 +227,9 @@ class Grammar {
 		compiler.loadCoreVariable("List");
 		compiler.callMethod(0, "new()");
 
+		
 		do {
+			// trace(compiler.parser.previous.start, compiler.parser.current.start);
 			// The opening string part.
 			literal(compiler, false);
 			compiler.callMethod(1, "addCore_(_)");
@@ -207,8 +241,17 @@ class Grammar {
 
 			compiler.ignoreNewlines();
 		} while (compiler.match(TOKEN_INTERPOLATION));
-
-			// The trailing string part.
+		// hack... to remove ')' and '"'
+		if(compiler.parser.current.start.startsWith(")")){
+			compiler.parser.current.start = compiler.parser.current.start.substr(1);
+			while(compiler.parser.current.start.startsWith('"')){
+				compiler.parser.current.start = compiler.parser.current.start.substr(1);
+			}
+		}
+		if(compiler.parser.current.start.endsWith('"')){
+			compiler.parser.current.start = compiler.parser.current.start.substring(0, compiler.parser.current.start.length - 1);
+		}
+		// The trailing string part.
 		compiler.consume(TOKEN_STRING, "Expect end of string interpolation.");
 		literal(compiler, false);
 		compiler.callMethod(1, "addCore_(_)");
@@ -422,6 +465,7 @@ class Grammar {
 		compiler.consume(TOKEN_LEFT_PAREN, "Expect '(' after operator name.");
 		compiler.declareNamedVariable();
 		compiler.consume(TOKEN_RIGHT_PAREN, "Expect ')' after parameter name.");
+		return signature;
 	}
 
 	/**
@@ -446,6 +490,7 @@ class Grammar {
 	public static function unarySignature(compiler:Compiler, signature:Signature) {
 		// Do nothing. The name is already complete.
 		signature.type = SIG_GETTER;
+		return signature;
 	}
 
 	/**
@@ -466,6 +511,7 @@ class Grammar {
 			compiler.declareNamedVariable();
 			compiler.consume(TOKEN_RIGHT_PAREN, "Expect ')' after parameter name.");
 		}
+		return signature;
 	}
 
 	/**
@@ -511,10 +557,11 @@ class Grammar {
 		signature.length = 0;
 
 		// Parse the parameters inside the subscript.
-		finishParameterList(compiler, signature);
+		signature = finishParameterList(compiler, signature);
 		compiler.consume(TOKEN_RIGHT_BRACKET, "Expect ']' after parameters.");
 
 		maybeSetter(compiler, signature);
+		return signature;
 	}
 
 	/**
@@ -524,13 +571,14 @@ class Grammar {
 	 */
 	public static function namedSignature(compiler:Compiler, signature:Signature) {
 		signature.type = SIG_GETTER;
-      
+		
 		// If it's a setter, it can't also have a parameter list.
 		if (maybeSetter(compiler, signature))
-			return;
+			return signature;
 
 		// Regular named method with an optional parameter list.
-		parameterList(compiler, signature);
+		signature = parameterList(compiler, signature);
+		return signature;
 	}
 
 	/**
@@ -538,27 +586,28 @@ class Grammar {
 	 * @param compiler
 	 * @param signature
 	 */
-	public static function constructorSignature(compiler:Compiler, signature:Signature) {
+	public static function constructorSignature(compiler:Compiler, signature:Signature):Signature {
 		compiler.consume(TOKEN_NAME, "Expect constructor name after 'construct'.");
 		
 		// Capture the name.
 		signature = compiler.signatureFromToken(SIG_INITIALIZER);
-
 		if (compiler.match(TOKEN_EQ)) {
 			compiler.error("A constructor cannot be a setter.");
 		}
 
 		if (!compiler.match(TOKEN_LEFT_PAREN)) {
 			compiler.error("A constructor cannot be a getter.");
-			return;
+			return signature;
 		}
 
 		// Allow an empty parameter list.
 		if (compiler.match(TOKEN_RIGHT_PAREN))
-			return;
+			return signature;
 
-		finishParameterList(compiler, signature);
+		signature = finishParameterList(compiler, signature);
 		compiler.consume(TOKEN_RIGHT_PAREN, "Expect ')' after parameters.");
+
+		return signature;
 	}
 
 	/**
@@ -571,17 +620,18 @@ class Grammar {
 	static function parameterList(compiler:Compiler, signature:Signature) {
 		// The parameter list is optional.
 		if (!compiler.match(TOKEN_LEFT_PAREN))
-			return;
+			return signature;
 
 		signature.type = SIG_METHOD;
 		// Allow an empty parameter list.
 		if (compiler.match(TOKEN_RIGHT_PAREN))
-			return;
+			return signature;
 
         
-        finishParameterList(compiler, signature);
+        signature = finishParameterList(compiler, signature);
        
 		compiler.consume(TOKEN_RIGHT_PAREN, "Expect ')' after parameters.");
+		return signature;
 	}
 
 	/**
@@ -599,6 +649,7 @@ class Grammar {
 
 			// Allow a newline before the closing delimiter.
 		compiler.ignoreNewlines();
+		return signature;
 	}
 
 	/**
@@ -611,11 +662,11 @@ class Grammar {
 		do {
 			compiler.ignoreNewlines();
 			compiler.validateNumParameters(++signature.arity);
-
 			// Define a local variable in the method for the parameter.
 			compiler.declareNamedVariable();
-        } while (compiler.match(TOKEN_COMMA));
-        
+		} while (compiler.match(TOKEN_COMMA));
+		
+		return signature; 
 	}
 
 	/**
@@ -729,7 +780,7 @@ class Grammar {
 
 			// Allow empty an argument list.
 			if (compiler.peek() != TOKEN_RIGHT_PAREN) {
-				finishArgumentList(compiler, called);
+				called = finishArgumentList(compiler, called);
 			}
 			compiler.consume(TOKEN_RIGHT_PAREN, "Expect ')' after arguments.");
 		}
@@ -751,7 +802,7 @@ class Grammar {
 
 			// Parse the parameter list, if any.
 			if (compiler.match(TOKEN_PIPE)) {
-				finishParameterList(fnCompiler, fnSignature);
+				fnSignature = finishParameterList(fnCompiler, fnSignature);
 				compiler.consume(TOKEN_PIPE, "Expect '|' after function parameters.");
 			}
 

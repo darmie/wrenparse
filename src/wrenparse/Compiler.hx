@@ -1,5 +1,6 @@
 package wrenparse;
 
+import haxe.CallStack;
 import polygonal.ds.tools.mem.ByteMemory;
 import haxe.io.UInt8Array;
 import haxe.io.UInt16Array;
@@ -222,6 +223,7 @@ class Compiler {
 			if (constant.IS_OBJ())
 				this.parser.vm.pushRoot(constant.AS_OBJ());
 			fn.constants.write(constant);
+			if (constant.IS_OBJ()) this.parser.vm.popRoot();
 			if (this.constants == null) {
 				this.constants = new ObjMap(this.parser.vm);
 			}
@@ -370,9 +372,10 @@ class Compiler {
 	 * The main entrypoint for the top-down operator precedence parser.
 	 * @param prec
 	 */
-	function parsePrecedence(precedence:Int) {
+	function parsePrecedence(precedence:Precedence) {
 		this.parser.nextToken();
-		var prefix = rules[this.parser.previous.type].prefix;
+		
+		var prefix:GrammarFn = rules[this.parser.previous.type].prefix;
 		if (prefix == null) {
 			error("Expected expression.");
 			return;
@@ -385,11 +388,12 @@ class Compiler {
 		// expressions that are valid lvalues -- names, subscripts, fields, etc. --
 		// we pass in whether or not it appears in a context loose enough to allow
 		// "=". If so, it will parse the "=" itself and handle it appropriately.
-		var canAssign = precedence <= cast(PREC_CONDITIONAL, Int);
+		var canAssign = precedence <= PREC_CONDITIONAL;
 
 		prefix(this, canAssign);
-		
-		while (precedence <= cast(rules[this.parser.current.type].precedence, Int)) {
+	
+	
+		while (precedence <= rules[this.parser.current.type].precedence) {
 			this.parser.nextToken();
 			var infix = rules[this.parser.previous.type].infix;
 			infix(this, canAssign);
@@ -439,7 +443,6 @@ class Compiler {
 		// Make a string constant for the name.
 		emitConstant(classNameString);
 	
-
 		// Load the superclass (if there is one).
 		if (match(TOKEN_IS)) {
 			parsePrecedence(PREC_CALL);
@@ -499,7 +502,7 @@ class Compiler {
 
 		// Update the class with the number of fields.
 		if (!isForeign) {
-			this.fn.code.data.set(numFieldsInstruction, classInfo.fields.count);
+			this.fn.code.data.set(numFieldsInstruction,  classInfo.fields.count);
 		}
 
 		// Clear symbol tables for tracking field and method names.
@@ -591,7 +594,8 @@ class Compiler {
 		var isForeign = match(TOKEN_FOREIGN);
 		var isStatic = match(TOKEN_STATIC);
 		this.enclosingClass.inStatic = isStatic;
-		var signatureFn = rules[this.parser.current.type].method;
+		
+		var signatureFn:SignatureFn = rules[this.parser.current.type].method;
 
 		this.parser.nextToken();
 
@@ -603,14 +607,16 @@ class Compiler {
 		// Build the method signature.
 		var signature = signatureFromToken(SIG_GETTER);
 
-
+		
 		this.enclosingClass.signature = signature;
 
 
 		var methodCompiler:Compiler = init(this.parser, this, true);
 
+
 		// Compile the method signature.
-		signatureFn(methodCompiler, signature);
+		signature = signatureFn(methodCompiler, signature);
+		
 
 		if (isStatic && signature.type == SIG_INITIALIZER) {
 			error("A constructor cannot be static.");
@@ -869,7 +875,6 @@ class Compiler {
 	 * @param arg
 	 */
 	public function emitShort(arg:Int) {
-		
 		var off = (arg >> 8) & 0xff;
 		var val = arg & 0xff;
 
@@ -908,7 +913,7 @@ class Compiler {
 	public function emitJump(instr:Code) {
 		emitOp(instr);
 		emitByte(0xff);
-		return emitByte(0xff) - 1;
+		return (emitByte(0xff) - 1) & 0xff;
 	}
 
 	/**
@@ -946,7 +951,6 @@ class Compiler {
 	public function declareVariable(?token:Token) {
 		if (token == null)
 			token = this.parser.previous;
-		
 		var length = token.start.length;
 		if (length > MAX_VARIABLE_NAME) {
 			error('Variable name cannot be longer than ${MAX_VARIABLE_NAME} characters.');
@@ -1059,7 +1063,7 @@ class Compiler {
 	 * @param signature
 	 * @param initializerSymbold
 	 */
-	function createConstructor(signature:Signature, initializerSymbol) {
+	function createConstructor(signature:Signature, initializerSymbol:Int) {
 		var methodCompiler = init(this.parser, this, true);
 
 		// Allocate the instance.
@@ -1359,7 +1363,7 @@ class Compiler {
 		var jump = fn.code.count - offset - 2;
 		if (jump > MAX_JUMP)
 			error("Too much code to jump over.");
-
+	
 		this.fn.code.data.set(offset, (jump >> 8) & 0xff);
 
 		this.fn.code.data.set(offset + 1, jump & 0xff);
@@ -1368,6 +1372,7 @@ class Compiler {
 	public function loadCoreVariable(name:String) {
 		var symbol = this.parser.module.variableNames.find(name);
 		Utils.ASSERT(symbol != -1, "Should have already defined core name.");
+		// trace(this.parser.previous.start, name, symbol, CODE_LOAD_MODULE_VAR);
 		emitShortArg(CODE_LOAD_MODULE_VAR, symbol);
 	}
 
@@ -1454,8 +1459,9 @@ class Compiler {
 	 * @param ip
 	 * @return Int
 	 */
-	public static function getByteCountForArguments(bytecode:ByteMemory, constants:Array<Value>, ip:Int):Int {
+	public static function getByteCountForArguments(bytecode:Bytes, constants:Array<Value>, ip:Int):Int {
 		var instruction:Code = bytecode.get(ip);
+		
 		return switch instruction {
 			case CODE_NULL | CODE_FALSE | CODE_TRUE | CODE_POP | CODE_CLOSE_UPVALUE | CODE_RETURN | CODE_END | CODE_LOAD_LOCAL_0 | CODE_LOAD_LOCAL_1 |
 				CODE_LOAD_LOCAL_2 | CODE_LOAD_LOCAL_3 | CODE_LOAD_LOCAL_4 | CODE_LOAD_LOCAL_5 | CODE_LOAD_LOCAL_6 | CODE_LOAD_LOCAL_7 | CODE_LOAD_LOCAL_8 |
@@ -1471,7 +1477,8 @@ class Compiler {
 			case CODE_SUPER_0 | CODE_SUPER_1 | CODE_SUPER_2 | CODE_SUPER_3 | CODE_SUPER_4 | CODE_SUPER_5 | CODE_SUPER_6 | CODE_SUPER_7 | CODE_SUPER_8 |
 				CODE_SUPER_9 | CODE_SUPER_10 | CODE_SUPER_11 | CODE_SUPER_12 | CODE_SUPER_13 | CODE_SUPER_14 | CODE_SUPER_15 | CODE_SUPER_16: 4;
 			case CODE_CLOSURE: {
-					var constant = (bytecode.get(ip + 1) << 8) | bytecode.get(ip + 2);
+					// trace(constants);
+					var constant = ((bytecode.get(ip + 1) << 8) | bytecode.get(ip + 2)) & 0xff;
 					var loadedFn:ObjFn = constants[constant].AS_FUN();
 
 					// There are two bytes for the constant, then two for each upvalue.
@@ -1526,8 +1533,9 @@ class Compiler {
 		// Find any break placeholder instructions (which will be CODE_END in the
 		// bytecode) and replace them with real jumps.
 		var i = this.loop.body;
+		// trace(this.fn.code.data.toHex());
 		while (i < this.fn.code.count) {
-			if (this.fn.code.data.get(i) == CODE_END) {
+			if (this.fn.code.data.get(i) ==  CODE_END) {
 				this.fn.code.data.set(i, CODE_JUMP);
 				patchJump(i + 1);
 				i += 3;

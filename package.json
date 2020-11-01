@@ -2,6 +2,7 @@
   "name": "wrenparse",
   "version": "0.0.1",
   "scripts": {
+    "build": "haxe build.hxml",
     "test": "bash build.sh",
     "haxe": "haxe",
     "neko": "neko",

@@ -109,9 +109,9 @@ class Value {
 	}
 
 	public inline function AS_CSTRING():String {
-		var v = cast(this.as.obj, ObjString).value;
+		var v = this.AS_STRING();
 		if(v == null) return null;
-		return v.join("");
+		return v.value.join("");
 	}
 
 	public inline function AS_NUM():Float {

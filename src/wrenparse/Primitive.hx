@@ -30,7 +30,7 @@ class Primitive {
 	 * @param func
 	 * @return
 	 */
-	public static inline function PRIMITIVE(vm:VM, cls:ObjClass, name:String, func:PrimitiveFunc) {
+	public static function PRIMITIVE(vm:VM, cls:ObjClass, name:String, func:PrimitiveFunc) {
 		var symbol = vm.methodNames.ensure(name);
 		var method = new Method(METHOD_PRIMITIVE);
 		method.as.primitive = func;
@@ -45,7 +45,7 @@ class Primitive {
 	 * @param name
 	 * @param func
 	 */
-	public static inline function FUNCTION_CALL(vm:VM, cls:ObjClass, name:String, func:PrimitiveFunc) {
+	public static function FUNCTION_CALL(vm:VM, cls:ObjClass, name:String, func:PrimitiveFunc) {
 		do {
 			var symbol = vm.methodNames.ensure(name);
 			var method = new Method(METHOD_FUNCTION_CALL);

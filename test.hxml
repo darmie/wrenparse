@@ -11,11 +11,25 @@
 -lib polygonal-ds
 -D WREN_DEBUG_DUMP_COMPILED_CODE
 -D WREN_COMPILE
--D debug
-
+# -D debug
 --interp
 
+# --java bin/java/test
+
+# --cmd java -jar bin/java/test/Test-Debug.jar
 
 
+# --cpp bin/cpp
+# --cmd bin/cpp/Test
+
+# --jvm bin/jvm/Test.jar
+# --cmd java -jar -noverify bin/jvm/Test.jar 
 
 
+# -lib hxnodejs
+# --js bin/js/Test.js
+# --cmd node bin/js/Test.js
+
+
+# --neko bin/neko/Test.n
+# --cmd neko bin/neko/Test.n

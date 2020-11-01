@@ -1,17 +1,20 @@
-var n = 0
+// var n = 0
 
-while(true){
-    n = n + 1
+// while(true){
+//     if(n >= 20){
+//         break
+//     }
+//     n = n + 1
+// }
 
-    if(n >= 20){
-        break
-    }
-}
+// var isSane = 1 != 2 ? "math is sane" : "math is not sane!"
 
-var isSane = 1 != 2 ? "math is sane" : "math is not sane!"
+// class Person {
+//     construct new(){
 
-class Person {
-    construct new(){
+//     }
+// }
 
-    }
-}
+// System.print("%(1) + %(2) + %("three")")
+
+System.print("Hello World")

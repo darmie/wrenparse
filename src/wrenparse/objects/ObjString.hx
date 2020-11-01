@@ -80,60 +80,36 @@ class ObjString extends Obj {
 	}
 
 	public static function format(vm:VM, format:String, args:Array<Dynamic>):Value {
-		var chars = format.split("");
-
-		for (arg in args) {
-			var i = 0;
-			var totalLength = 0;
-			while (chars[i] != String.fromCharCode(0)) {
-				switch chars[i] {
-					case "$":
-						{
-							totalLength += cast(arg, String).length;
-						}
-					case "@":
-						{
-							totalLength += cast(cast(arg, Value).as.obj, ObjString).length;
-						}
-					default:
-						{
-							// Any other character is interpreted literally.
-							totalLength++;
-						}
-				}
-				i++;
-			}
-		}
+		
 
 		// Concatenate the string.
 		// ObjString* result = allocateString(vm, totalLength);
 		var result = new ObjString(vm, "");
 		var start = result.value;
 		for (arg in args) {
-			var i = 0;
-			var totalLength = 0;
-			while (chars[i] != String.fromCharCode(0)) {
-				switch chars[i] {
+			for(i in 0...format.length) {
+				switch format.charAt(i) {
 					case "$":
 						{
-							var str = cast(arg, String);
-							start = str.split("");
+							trace(arg);
+							var str:String = arg;
+							start = start.concat(str.split(""));
 						}
 					case "@":
 						{
-							var str = cast(cast(arg, Value).as.obj, ObjString).value;
-							start = str;
+							var str = arg.AS_STRING().value;
+							start = start.concat(str);
 						}
 					default:
 						{
 							// Any other character is interpreted literally.
-							start = arg;
+							start.push(format.charAt(i));
+							
 						}
 				}
-				i++;
 			}
 		}
-
+		result.value = start;
 		result.hashString();
 		return result.OBJ_VAL();
 	}
